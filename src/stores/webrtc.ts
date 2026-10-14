@@ -34,6 +34,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
   const remoteStream = ref<MediaStream | null>(null)
   const hasAudioTrack = ref(false)
   const remoteHasAudio = ref(false)
+  const captureSurface = ref('')
   const busy = ref(false)
   const linkVersion = ref(0)
   const bitrateLabel = ref('')
@@ -124,11 +125,17 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     remoteHasAudio.value = Boolean(stream && stream.getAudioTracks().length > 0)
   }
 
+  function readCaptureSurface(stream: MediaStream | null) {
+    const settings = stream?.getVideoTracks()[0]?.getSettings() as MediaTrackSettings & { displaySurface?: string }
+    return settings?.displaySurface ?? ''
+  }
+
   function releaseLocal() {
     captureGen += 1
     mesh.release()
     localStream.value = null
     hasAudioTrack.value = false
+    captureSurface.value = ''
     if (role.value === 'publishing') role.value = 'idle'
     refreshLink()
   }
@@ -470,6 +477,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
       role.value = 'publishing'
       hasAudioTrack.value = hasAudio
       localStream.value = mesh.localStream
+      captureSurface.value = readCaptureSurface(mesh.localStream)
       if (!hasAudio) ui.notify('这次分享没有音频，其他人只能看到画面', 'warn')
       await mesh.syncViewers(room.viewers.map((item) => item.connId))
       refreshLink()
@@ -505,6 +513,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
       })
       hasAudioTrack.value = hasAudio
       localStream.value = mesh.localStream
+      captureSurface.value = readCaptureSurface(mesh.localStream)
       if (!hasAudio) ui.notify('这次更换后没有音频', 'warn')
     } catch (error) {
       if (!isUserCancel(error)) ui.notify('没能更换分享内容', 'error')
@@ -564,6 +573,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     localStream.value = null
     rememberRemote(null)
     hasAudioTrack.value = false
+    captureSurface.value = ''
     role.value = 'idle'
     refreshLink()
   }
@@ -574,6 +584,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     remoteStream,
     hasAudioTrack,
     remoteHasAudio,
+    captureSurface,
     busy,
     linkLabel,
     iceFailed,

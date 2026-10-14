@@ -123,6 +123,9 @@ async function logout() {
         <p v-else-if="showNoAudio" class="banner warn">
           当前分享没有音频。可以停止后重试，并在浏览器窗口里勾选分享音频。
         </p>
+        <p v-if="rtc.captureSurface === 'window' || rtc.captureSurface === 'browser'" class="banner warn">
+          当前分享的是窗口。Windows 上这样采集经常是黑屏，手机也会一起黑。请停止后改选「整个屏幕」。
+        </p>
         <VideoStage
           v-if="activeStream"
           ref="stage"

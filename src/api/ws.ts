@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { wsUrl } from '@/api/env'
 import type { Envelope } from '@/types/protocol'
+import { newClientId } from '@/utils/id'
 
 type Handler = (envelope: Envelope) => void
 
@@ -72,7 +73,7 @@ class SignalingClient {
   }
 
   request(type: string, payload: unknown, accepts: string[], timeoutMs = 12000) {
-    const requestId = crypto.randomUUID()
+    const requestId = newClientId()
     return new Promise<Envelope>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(requestId)
@@ -105,7 +106,7 @@ class SignalingClient {
       const envelope: Envelope = {
         v: 1,
         type: 'auth',
-        requestId: crypto.randomUUID(),
+        requestId: newClientId(),
         payload: { accessToken: token },
       }
       socket.send(JSON.stringify(envelope))

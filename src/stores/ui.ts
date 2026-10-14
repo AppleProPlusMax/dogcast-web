@@ -1,5 +1,6 @@
 import { ref, watch } from 'vue'
 import { defineStore } from 'pinia'
+import { newClientId } from '@/utils/id'
 
 export interface ToastItem {
   id: string
@@ -66,7 +67,7 @@ export const useUiStore = defineStore('ui', () => {
   }
 
   function notify(text: string, tone: ToastItem['tone'] = 'info') {
-    const id = crypto.randomUUID()
+    const id = newClientId()
     const next = [...toasts.value, { id, text, tone }]
     toasts.value = next.slice(-4)
     window.setTimeout(() => dismiss(id), 4600)
