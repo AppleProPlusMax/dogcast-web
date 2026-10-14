@@ -82,6 +82,14 @@ p { color: var(--muted); line-height: 1.55; }
 .field input[type="range"] { width: 100%; accent-color: var(--accent); }
 .check { grid-auto-flow: column; justify-content: start; align-items: center; }
 .form-error { color: #ffb8a8; margin: 0; }
+.invite-result { display: grid; gap: 8px; }
+.invite-code {
+  margin: 0;
+  color: var(--text);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 28px;
+  letter-spacing: 0.08em;
+}
 
 .auth-shell {
   min-height: 100vh;
