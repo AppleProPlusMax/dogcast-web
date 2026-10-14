@@ -67,6 +67,11 @@ const canStart = computed(
 const canKick = computed(
   () => auth.user?.role === 'admin' && someoneElse.value && signalingState.value === 'open',
 )
+const showPlayer = computed(() => rtc.role === 'viewing' || (someoneElse.value && rtc.role !== 'publishing'))
+const playerDetail = computed(() => {
+  const audio = rtc.remoteStream ? (rtc.remoteHasAudio ? '有声音' : '没有声音') : '等待画面'
+  return `${audio} · ${linkText.value}`
+})
 const showNoAudio = computed(
   () =>
     (rtc.role === 'publishing' && !rtc.hasAudioTrack) ||
@@ -113,21 +118,36 @@ async function logout() {
     </header>
 
     <div class="room-body">
-      <section class="stage">
-        <div class="stage-copy">
+      <section class="stage" :class="{ 'as-player': showPlayer }">
+        <div v-if="!showPlayer" class="stage-copy">
           <p class="eyebrow">{{ room.viewerCount }}/{{ room.room?.maxViewers ?? 4 }} 人在看</p>
           <h1>{{ stageTitle }}</h1>
           <p>{{ stageNote }}</p>
         </div>
         <p v-if="!capability.secure" class="banner warn">当前页面不是安全上下文，浏览器不会允许分享屏幕。</p>
-        <p v-else-if="showNoAudio" class="banner warn">
+        <p v-else-if="showNoAudio && !showPlayer" class="banner warn">
           当前分享没有音频。可以停止后重试，并在浏览器窗口里勾选分享音频。
         </p>
         <p v-if="rtc.captureSurface === 'window' || rtc.captureSurface === 'browser'" class="banner warn">
           当前分享的是窗口。Windows 上这样采集经常是黑屏，手机也会一起黑。请停止后改选「整个屏幕」。
         </p>
         <VideoStage
-          v-if="activeStream"
+          v-if="showPlayer"
+          ref="stage"
+          player
+          :stream="rtc.remoteStream"
+          :muted="ui.remoteMuted"
+          :volume="ui.remoteVolume"
+          :title="stageTitle"
+          :detail="playerDetail"
+          :bitrate="rtc.bitrateLabel"
+          :waiting="rtc.role === 'viewing'"
+          @update:muted="ui.remoteMuted = $event"
+          @update:volume="ui.remoteVolume = $event"
+          @watch="rtc.watchShare()"
+        />
+        <VideoStage
+          v-else-if="activeStream"
           ref="stage"
           :stream="activeStream"
           :muted="previewMuted"
@@ -175,7 +195,7 @@ async function logout() {
         @switch-source="rtc.switchSource()"
       />
       <button
-        v-if="someoneElse && rtc.role !== 'viewing'"
+        v-if="someoneElse && rtc.role !== 'viewing' && !showPlayer"
         class="btn"
         type="button"
         :disabled="rtc.busy"
@@ -183,7 +203,7 @@ async function logout() {
       >
         观看
       </button>
-      <label class="volume" :class="{ off: rtc.role !== 'viewing' }">
+      <label v-if="!showPlayer" class="volume" :class="{ off: rtc.role !== 'viewing' }">
         <input v-model="ui.remoteMuted" type="checkbox" :disabled="rtc.role !== 'viewing'" />
         <span>{{ ui.remoteMuted ? '已静音' : '声音' }}</span>
         <input
@@ -195,9 +215,9 @@ async function logout() {
           :disabled="rtc.role !== 'viewing'"
         />
       </label>
-      <button class="btn ghost" type="button" :disabled="!activeStream" @click="stage?.toggleFullscreen()">全屏</button>
+      <button v-if="!showPlayer" class="btn ghost" type="button" :disabled="!activeStream" @click="stage?.toggleFullscreen()">全屏</button>
       <button v-if="rtc.iceFailed" class="btn ghost" type="button" @click="rtc.askRenegotiate()">重新连接</button>
-      <span class="meter">{{ rtc.bitrateLabel }}</span>
+      <span v-if="!showPlayer" class="meter">{{ rtc.bitrateLabel }}</span>
     </footer>
 
     <AudioShareHint :open="hintOpen" @confirm="confirmHint" @cancel="hintOpen = false" />

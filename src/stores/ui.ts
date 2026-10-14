@@ -24,7 +24,7 @@ function clamp(value: number, min: number, max: number) {
 
 export const useUiStore = defineStore('ui', () => {
   const toasts = ref<ToastItem[]>([])
-  const preferredMaxBitrateKbps = ref(6000)
+  const preferredMaxBitrateKbps = ref(8000)
   const forceRelay = ref(false)
   const remoteMuted = ref(false)
   const remoteVolume = ref(1)
@@ -36,7 +36,7 @@ export const useUiStore = defineStore('ui', () => {
       if (!raw) return
       const data = JSON.parse(raw) as StoredPrefs
       if (typeof data.preferredMaxBitrateKbps === 'number') {
-        preferredMaxBitrateKbps.value = clamp(data.preferredMaxBitrateKbps, 2000, 12000)
+        preferredMaxBitrateKbps.value = clamp(data.preferredMaxBitrateKbps, 8000, 12000)
       }
       if (typeof data.forceRelay === 'boolean') forceRelay.value = data.forceRelay
       if (typeof data.remoteMuted === 'boolean') remoteMuted.value = data.remoteMuted

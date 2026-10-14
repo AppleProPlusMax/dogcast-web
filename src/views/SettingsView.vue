@@ -73,8 +73,8 @@ async function logout() {
         <h2>偏好</h2>
         <label class="field">
           <span>单路视频码率 {{ bitrateMbps.toFixed(0) }} Mbps</span>
-          <input v-model.number="bitrateMbps" type="range" min="2" max="12" step="1" />
-          <small>建议从 4–8 Mbps 开始。观众变多时可以降到 3–6 Mbps。</small>
+          <input v-model.number="bitrateMbps" type="range" min="8" max="12" step="1" />
+          <small>1080p 单路不要低于 8 Mbps，否则画面会发糊。</small>
         </label>
         <label class="field">
           <span>远程音量 {{ volumePercent }}%</span>

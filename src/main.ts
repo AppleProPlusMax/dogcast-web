@@ -6,6 +6,7 @@ import { installSession } from '@/session'
 import { useAuthStore } from '@/stores/auth'
 import { useRoomStore } from '@/stores/room'
 import { useWebrtcStore } from '@/stores/webrtc'
+import 'media-chrome'
 import '@/styles.css'
 
 const app = createApp(App)
