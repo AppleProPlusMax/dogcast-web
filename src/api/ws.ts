@@ -145,7 +145,7 @@ class SignalingClient {
       this.startPing()
     }
 
-    if (envelope.type === 'auth.error') {
+    if (envelope.type === 'auth.error' || envelope.type === 'session.replaced') {
       this.shouldRun = false
       this.ws?.close()
     }

@@ -6,6 +6,7 @@ export type WsType =
   | 'auth'
   | 'auth.ok'
   | 'auth.error'
+  | 'session.replaced'
   | 'room.join'
   | 'room.leave'
   | 'room.snapshot'

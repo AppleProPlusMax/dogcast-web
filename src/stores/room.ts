@@ -5,6 +5,7 @@ import { ApiError, errorText } from '@/api/errors'
 import { signaling } from '@/api/ws'
 import { useAuthStore } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
+import { router } from '@/router'
 import type {
   DefaultRoomResponse,
   Envelope,
@@ -90,6 +91,19 @@ export const useRoomStore = defineStore('room', () => {
     signaling.start(() => auth.accessToken)
   }
 
+  function onSignedInElsewhere() {
+    signaling.stop()
+    joined.value = false
+    connId.value = null
+    membersOnline.value = []
+    share.value = { status: 'idle' }
+    viewers.value = []
+    viewerCount.value = 0
+    useAuthStore().failSession()
+    useUiStore().notify('这个账号已在另一处登录', 'warn')
+    void router.push({ path: '/login', query: { reason: 'replaced' } })
+  }
+
   function onPresenceJoined(payload: unknown) {
     const member = payload as MemberOnline
     if (!member?.connId) return
@@ -149,6 +163,9 @@ export const useRoomStore = defineStore('room', () => {
     })
     signaling.on('auth.error', () => {
       void onAuthError()
+    })
+    signaling.on('session.replaced', () => {
+      onSignedInElsewhere()
     })
     signaling.on('room.snapshot', (envelope) => applySnapshot(envelope.payload))
     signaling.on('presence.joined', (envelope) => onPresenceJoined(envelope.payload))

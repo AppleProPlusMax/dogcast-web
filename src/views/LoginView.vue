@@ -67,6 +67,7 @@ async function submit() {
           {{ pending ? '正在登录…' : '进入房间' }}
         </button>
       </form>
+      <p v-if="route.query.reason === 'replaced'" class="form-error">这个账号已在另一处登录，请在当前页面重新登录。</p>
       <p class="switch">
         有邀请码？
         <RouterLink to="/register">注册一个账号</RouterLink>
