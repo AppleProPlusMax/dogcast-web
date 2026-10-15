@@ -7,6 +7,8 @@ import { useRoomStore } from '@/stores/room'
 import { useUiStore } from '@/stores/ui'
 import type { IceServer, IceServersResponse, SignalPayload } from '@/types/protocol'
 import { isUserCancel } from '@/webrtc/constraints'
+import { captureBlockReason } from '@/utils/browser-capability'
+import { perViewerBitrateKbps } from '@/webrtc/bitrate'
 import { PublisherMesh } from '@/webrtc/publisher'
 import { ViewerSession } from '@/webrtc/viewer'
 
@@ -67,7 +69,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     selfConnId: () => room.connId ?? '',
     iceServers: () => iceServers,
     forceRelay: () => ui.forceRelay,
-    maxBitrateKbps: () => ui.preferredMaxBitrateKbps,
+    maxBitrateKbps: (viewerCount) => perViewerBitrateKbps(ui.uploadBudgetKbps, viewerCount),
     send,
     onChange: refreshLink,
   })
@@ -366,7 +368,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     watch(() => room.stateVersion, () => {
       void reconcile()
     })
-    watch(() => ui.preferredMaxBitrateKbps, () => {
+    watch(() => ui.uploadBudgetKbps, () => {
       if (role.value === 'publishing') void mesh.applyBitrate()
     })
     watch(() => ui.forceRelay, () => {
@@ -412,8 +414,9 @@ export const useWebrtcStore = defineStore('webrtc', () => {
       ui.notify('已经有人在分享', 'warn')
       return
     }
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      ui.notify('这个浏览器不能分享屏幕', 'error')
+    const blocked = captureBlockReason()
+    if (blocked) {
+      ui.notify(blocked, 'error')
       return
     }
 

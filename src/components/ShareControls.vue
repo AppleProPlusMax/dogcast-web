@@ -4,6 +4,7 @@ defineProps<{
   busy: boolean
   canStart: boolean
   canKick: boolean
+  canShare: boolean
 }>()
 
 defineEmits<{
@@ -16,12 +17,12 @@ defineEmits<{
 
 <template>
   <div class="share-actions">
-    <button v-if="!sharing" class="btn primary" type="button" :disabled="!canStart || busy" @click="$emit('start')">
+    <button v-if="canShare && !sharing" class="btn primary" type="button" :disabled="!canStart || busy" @click="$emit('start')">
       {{ busy ? '正在连接屏幕…' : '开始分享' }}
     </button>
-    <template v-else>
+    <template v-else-if="sharing">
       <button class="btn danger" type="button" :disabled="busy" @click="$emit('stop')">停止分享</button>
-      <button class="btn" type="button" :disabled="busy" @click="$emit('switchSource')">更换来源</button>
+      <button v-if="canShare" class="btn" type="button" :disabled="busy" @click="$emit('switchSource')">更换来源</button>
     </template>
     <button v-if="canKick" class="btn ghost" type="button" @click="$emit('kick')">结束当前分享</button>
   </div>

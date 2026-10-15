@@ -12,13 +12,16 @@ import { useRoomStore } from '@/stores/room'
 import { useUiStore } from '@/stores/ui'
 import { useWebrtcStore } from '@/stores/webrtc'
 import { signOut } from '@/session'
-import { detectCapability } from '@/utils/browser-capability'
+import { captureBlockReason, detectCapability, isPhone, localhostShareUrl } from '@/utils/browser-capability'
 
 const auth = useAuthStore()
 const room = useRoomStore()
 const rtc = useWebrtcStore()
 const ui = useUiStore()
 const capability = detectCapability()
+const phone = isPhone()
+const shareBlock = captureBlockReason()
+const localhostUrl = localhostShareUrl()
 const hintOpen = ref(false)
 const stage = ref<{ toggleFullscreen: () => void } | null>(null)
 const signingOut = ref(false)
@@ -189,11 +192,16 @@ async function logout() {
         :busy="rtc.busy"
         :can-start="canStart"
         :can-kick="canKick"
+        :can-share="!phone"
         @start="requestShare"
         @stop="rtc.stopPublish()"
         @kick="rtc.kickShare()"
         @switch-source="rtc.switchSource()"
       />
+      <p v-if="shareBlock && !phone" class="hint">
+        {{ shareBlock }}
+        <a :href="localhostUrl">打开 localhost</a>
+      </p>
       <button
         v-if="someoneElse && rtc.role !== 'viewing' && !showPlayer"
         class="btn"

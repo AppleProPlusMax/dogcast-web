@@ -17,11 +17,22 @@ export const router = createRouter({
 })
 
 let restoring: Promise<void> | null = null
+let skipPublicRestoreUntil = 0
 
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
-  if (!restoring) restoring = auth.restoreSession()
-  await restoring
+  const signedIn = auth.status === 'authenticated' && !!auth.accessToken
+  const skipRestore = !signedIn && to.meta.public && Date.now() < skipPublicRestoreUntil
+  if (!signedIn && !skipRestore) {
+    if (!restoring) {
+      restoring = auth.restoreSession().finally(() => {
+        restoring = null
+      })
+    }
+    await restoring
+    if (auth.status === 'authenticated' && auth.accessToken) skipPublicRestoreUntil = 0
+    else skipPublicRestoreUntil = Date.now() + 5_000
+  }
 
   if (!to.meta.public && auth.status !== 'authenticated') {
     return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }

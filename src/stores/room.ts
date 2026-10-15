@@ -3,9 +3,8 @@ import { defineStore } from 'pinia'
 import { api } from '@/api/http'
 import { ApiError, errorText } from '@/api/errors'
 import { signaling } from '@/api/ws'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore, markReplacedElsewhere } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
-import { router } from '@/router'
 import type {
   DefaultRoomResponse,
   Envelope,
@@ -85,6 +84,7 @@ export const useRoomStore = defineStore('room', () => {
     const auth = useAuthStore()
     const token = await auth.refresh()
     if (!token) {
+      signaling.stop()
       auth.failSession()
       return
     }
@@ -92,6 +92,7 @@ export const useRoomStore = defineStore('room', () => {
   }
 
   function onSignedInElsewhere() {
+    markReplacedElsewhere()
     signaling.stop()
     joined.value = false
     connId.value = null
@@ -101,7 +102,6 @@ export const useRoomStore = defineStore('room', () => {
     viewerCount.value = 0
     useAuthStore().failSession()
     useUiStore().notify('这个账号已在另一处登录', 'warn')
-    void router.push({ path: '/login', query: { reason: 'replaced' } })
   }
 
   function onPresenceJoined(payload: unknown) {

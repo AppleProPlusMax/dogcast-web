@@ -9,7 +9,7 @@ export interface MeshOptions {
   selfConnId: () => string
   iceServers: () => RTCIceServer[]
   forceRelay: () => boolean
-  maxBitrateKbps: () => number
+  maxBitrateKbps: (viewerCount: number) => number
   send: (type: OutboundType, payload: SignalPayload) => void
   onChange: () => void
 }
@@ -82,7 +82,7 @@ export class PublisherMesh {
     slot.remoteReady = true
     const queued = slot.pending.splice(0)
     for (const candidate of queued) await slot.pc.addIceCandidate(candidate)
-    await setVideoMaxBitrate(slot.pc, this.opts.maxBitrateKbps())
+    await setVideoMaxBitrate(slot.pc, this.linkBitrateKbps())
   }
 
   async acceptIce(fromConnId: string, candidate: RTCIceCandidateInit | null) {
@@ -103,7 +103,7 @@ export class PublisherMesh {
       if (!slot) continue
       const offer = await slot.pc.createOffer()
       await slot.pc.setLocalDescription(offer)
-      await setVideoMaxBitrate(slot.pc, this.opts.maxBitrateKbps())
+      await setVideoMaxBitrate(slot.pc, this.linkBitrateKbps())
       this.opts.send('signal.offer', {
         roomId: this.opts.roomId(),
         toConnId: id,
@@ -115,7 +115,7 @@ export class PublisherMesh {
 
   async applyBitrate() {
     await Promise.all(
-      [...this.slots.values()].map((slot) => setVideoMaxBitrate(slot.pc, this.opts.maxBitrateKbps())),
+      [...this.slots.values()].map((slot) => setVideoMaxBitrate(slot.pc, this.linkBitrateKbps())),
     )
   }
 
@@ -156,6 +156,10 @@ export class PublisherMesh {
     return this.hasAudio
   }
 
+  private linkBitrateKbps() {
+    return this.opts.maxBitrateKbps(Math.max(1, this.slots.size))
+  }
+
   private adopt(stream: MediaStream, onEnded: () => void) {
     this.localStream = stream
     this.ignoreEnded = false
@@ -176,6 +180,7 @@ export class PublisherMesh {
     for (const id of want) {
       if (!this.slots.has(id)) await this.offerTo(id)
     }
+    await this.applyBitrate()
   }
 
   private async offerTo(viewerConnId: string) {
@@ -198,7 +203,7 @@ export class PublisherMesh {
       }
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-      await setVideoMaxBitrate(pc, this.opts.maxBitrateKbps())
+      await setVideoMaxBitrate(pc, this.linkBitrateKbps())
       this.opts.send('signal.offer', {
         roomId: this.opts.roomId(),
         toConnId: viewerConnId,
@@ -234,7 +239,7 @@ export class PublisherMesh {
     const bump = () => {
       this.opts.onChange()
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        void setVideoMaxBitrate(pc, this.opts.maxBitrateKbps())
+        void setVideoMaxBitrate(pc, this.linkBitrateKbps())
       }
     }
     pc.onconnectionstatechange = bump

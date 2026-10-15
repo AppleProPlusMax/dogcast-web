@@ -5,6 +5,20 @@ import { apiUrl } from '@/api/env'
 import { ApiError } from '@/api/errors'
 import type { AuthResponse, User } from '@/types/protocol'
 
+const REPLACED_KEY = 'dogcast.replaced'
+
+function replacedElsewhere() {
+  return sessionStorage.getItem(REPLACED_KEY) === '1'
+}
+
+export function markReplacedElsewhere() {
+  sessionStorage.setItem(REPLACED_KEY, '1')
+}
+
+function clearReplacedElsewhere() {
+  sessionStorage.removeItem(REPLACED_KEY)
+}
+
 function unwrapUser(data: User | { user?: User } | null | undefined): User | null {
   if (!data) return null
   if ('username' in data && 'id' in data) return data
@@ -16,6 +30,7 @@ export const useAuthStore = defineStore('auth', () => {
   const accessToken = ref<string | null>(null)
   const status = ref<'idle' | 'restoring' | 'authenticated'>('idle')
   let refreshFlight: Promise<string | null> | null = null
+  let refreshBlockedUntil = 0
 
   function failSession() {
     accessToken.value = null
@@ -24,12 +39,19 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function refreshOnce() {
+    if (Date.now() < refreshBlockedUntil) return null
     try {
       const response = await fetch(apiUrl('/api/auth/refresh'), {
         method: 'POST',
         credentials: 'include',
         headers: { Accept: 'application/json' },
       })
+      if (response.status === 429) {
+        const retryAfter = Number(response.headers.get('retry-after'))
+        const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 5_000
+        refreshBlockedUntil = Date.now() + waitMs
+        return null
+      }
       if (!response.ok) return null
       const data = (await response.json()) as AuthResponse
       if (!data.accessToken) return null
@@ -60,6 +82,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function applySession(data: AuthResponse) {
+    clearReplacedElsewhere()
     accessToken.value = data.accessToken
     const next = unwrapUser(data.user)
     if (next) user.value = next
@@ -101,6 +124,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function restoreSession() {
+    if (replacedElsewhere()) {
+      failSession()
+      return
+    }
     if (status.value === 'authenticated' && accessToken.value) return
     status.value = 'restoring'
     const token = await refresh()

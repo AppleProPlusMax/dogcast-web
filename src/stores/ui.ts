@@ -9,11 +9,30 @@ export interface ToastItem {
 }
 
 interface StoredPrefs {
+  uploadBudgetKbps?: number
   preferredMaxBitrateKbps?: number
   forceRelay?: boolean
   remoteMuted?: boolean
   remoteVolume?: number
   showAudioShareHint?: boolean
+}
+
+export const UPLOAD_PRESETS = [
+  { id: 'balanced', label: '均衡', kbps: 24_000 },
+  { id: 'sharp', label: '清晰', kbps: 36_000 },
+  { id: 'max', label: '极致', kbps: 48_000 },
+] as const
+
+export const UPLOAD_BUDGET_MIN_KBPS = 12_000
+export const UPLOAD_BUDGET_MAX_KBPS = 80_000
+
+const DEFAULT_UPLOAD_KBPS = 24_000
+
+function nearestUploadBudget(kbps: number) {
+  const inRange = clamp(kbps, UPLOAD_BUDGET_MIN_KBPS, UPLOAD_BUDGET_MAX_KBPS)
+  return UPLOAD_PRESETS.reduce((best, preset) =>
+    Math.abs(preset.kbps - inRange) < Math.abs(best.kbps - inRange) ? preset : best,
+  ).kbps
 }
 
 const STORAGE_KEY = 'dogcast.ui'
@@ -24,7 +43,7 @@ function clamp(value: number, min: number, max: number) {
 
 export const useUiStore = defineStore('ui', () => {
   const toasts = ref<ToastItem[]>([])
-  const preferredMaxBitrateKbps = ref(8000)
+  const uploadBudgetKbps = ref(DEFAULT_UPLOAD_KBPS)
   const forceRelay = ref(false)
   const remoteMuted = ref(false)
   const remoteVolume = ref(1)
@@ -35,8 +54,11 @@ export const useUiStore = defineStore('ui', () => {
       const raw = localStorage.getItem(STORAGE_KEY)
       if (!raw) return
       const data = JSON.parse(raw) as StoredPrefs
-      if (typeof data.preferredMaxBitrateKbps === 'number') {
-        preferredMaxBitrateKbps.value = clamp(data.preferredMaxBitrateKbps, 8000, 12000)
+      const savedBudget = data.uploadBudgetKbps
+      if (typeof savedBudget === 'number' && savedBudget >= UPLOAD_BUDGET_MIN_KBPS && savedBudget <= UPLOAD_BUDGET_MAX_KBPS) {
+        uploadBudgetKbps.value = Math.round(savedBudget)
+      } else if (typeof data.preferredMaxBitrateKbps === 'number') {
+        uploadBudgetKbps.value = nearestUploadBudget(data.preferredMaxBitrateKbps)
       }
       if (typeof data.forceRelay === 'boolean') forceRelay.value = data.forceRelay
       if (typeof data.remoteMuted === 'boolean') remoteMuted.value = data.remoteMuted
@@ -49,7 +71,7 @@ export const useUiStore = defineStore('ui', () => {
 
   function save() {
     const data: StoredPrefs = {
-      preferredMaxBitrateKbps: preferredMaxBitrateKbps.value,
+      uploadBudgetKbps: uploadBudgetKbps.value,
       forceRelay: forceRelay.value,
       remoteMuted: remoteMuted.value,
       remoteVolume: remoteVolume.value,
@@ -60,7 +82,7 @@ export const useUiStore = defineStore('ui', () => {
 
   load()
 
-  watch([preferredMaxBitrateKbps, forceRelay, remoteMuted, remoteVolume, showAudioShareHint], save)
+  watch([uploadBudgetKbps, forceRelay, remoteMuted, remoteVolume, showAudioShareHint], save)
 
   function dismiss(id: string) {
     toasts.value = toasts.value.filter((item) => item.id !== id)
@@ -75,7 +97,7 @@ export const useUiStore = defineStore('ui', () => {
 
   return {
     toasts,
-    preferredMaxBitrateKbps,
+    uploadBudgetKbps,
     forceRelay,
     remoteMuted,
     remoteVolume,

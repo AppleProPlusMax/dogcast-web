@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps<{
   stream: MediaStream | null
@@ -20,6 +20,7 @@ const emit = defineEmits<{
 
 const video = ref<HTMLVideoElement | null>(null)
 const frame = ref<HTMLElement | null>(null)
+const statusText = computed(() => [props.detail, props.bitrate].filter(Boolean).join(' · '))
 let unmuteTrack: MediaStreamTrack | null = null
 let applying = false
 
@@ -122,8 +123,7 @@ defineExpose({ toggleFullscreen })
       <media-mute-button></media-mute-button>
       <media-volume-range></media-volume-range>
       <media-live-button></media-live-button>
-      <span class="player-meta">{{ detail }}</span>
-      <span v-if="bitrate" class="player-meta">{{ bitrate }}</span>
+      <span v-if="statusText" class="player-meta">{{ statusText }}</span>
       <span class="player-spacer"></span>
       <media-fullscreen-button></media-fullscreen-button>
     </media-control-bar>
