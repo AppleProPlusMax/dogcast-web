@@ -6,9 +6,9 @@ import { signaling } from '@/api/ws'
 import { useRoomStore } from '@/stores/room'
 import { useUiStore } from '@/stores/ui'
 import type { IceServer, IceServersResponse, SignalPayload } from '@/types/protocol'
-import { isUserCancel } from '@/webrtc/constraints'
+import { isUserCancel, type CaptureProfile } from '@/webrtc/constraints'
 import { captureBlockReason } from '@/utils/browser-capability'
-import { perViewerBitrateKbps } from '@/webrtc/bitrate'
+import { type VideoEncodeProfile } from '@/webrtc/bitrate'
 import { PublisherMesh } from '@/webrtc/publisher'
 import { ViewerSession } from '@/webrtc/viewer'
 
@@ -20,6 +20,26 @@ function toIceServers(servers: IceServer[]): RTCIceServer[] {
   }))
 }
 
+function captureProfile(ui: ReturnType<typeof useUiStore>): CaptureProfile {
+  return {
+    width: ui.qualityWidth,
+    height: ui.qualityHeight,
+    fps: ui.qualityFps,
+    degradation: ui.qualityDegradation,
+    systemAudio: ui.systemAudio,
+    microphone: ui.microphone,
+  }
+}
+
+function videoProfile(ui: ReturnType<typeof useUiStore>): VideoEncodeProfile {
+  return {
+    width: ui.qualityWidth,
+    height: ui.qualityHeight,
+    fps: ui.qualityFps,
+    bitrateKbps: ui.qualityBitrateKbps,
+    degradation: ui.qualityDegradation,
+  }
+}
 function asSignal(payload: unknown): SignalPayload | null {
   if (!payload || typeof payload !== 'object') return null
   const body = payload as SignalPayload
@@ -64,20 +84,33 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     signaling.send(type, payload)
   }
 
-  const mesh = new PublisherMesh({
+  const meshOptions = {
     roomId: () => room.room?.id ?? '',
     selfConnId: () => room.connId ?? '',
     iceServers: () => iceServers,
     forceRelay: () => ui.forceRelay,
-    maxBitrateKbps: (viewerCount) => perViewerBitrateKbps(ui.uploadBudgetKbps, viewerCount),
+    captureProfile: () => captureProfile(ui),
+    videoProfile: () => videoProfile(ui),
     send,
     onChange: refreshLink,
-  })
+  }
+  const mesh = new PublisherMesh(meshOptions)
+  const relay = new PublisherMesh(meshOptions)
+
+  function childIds() {
+    if (!room.connId) return []
+    return room.viewers.filter((item) => item.parentConnId === room.connId).map((item) => item.connId)
+  }
+
+  function parentId() {
+    const self = room.viewers.find((item) => item.connId === room.connId)
+    return self?.parentConnId || room.share.publisherConnId || null
+  }
 
   const viewer = new ViewerSession({
     roomId: () => room.room?.id ?? '',
     selfConnId: () => room.connId ?? '',
-    publisherConnId: () => room.share.publisherConnId ?? null,
+    publisherConnId: () => parentId(),
     iceServers: () => iceServers,
     forceRelay: () => ui.forceRelay,
     send,
@@ -125,6 +158,16 @@ export const useWebrtcStore = defineStore('webrtc', () => {
   function rememberRemote(stream: MediaStream | null) {
     remoteStream.value = stream
     remoteHasAudio.value = Boolean(stream && stream.getAudioTracks().length > 0)
+    if (role.value === 'viewing' && stream) void syncRelay()
+  }
+
+  async function syncRelay() {
+    if (role.value !== 'viewing' || !remoteStream.value) {
+      relay.releaseLinks()
+      return
+    }
+    relay.useForward(remoteStream.value)
+    await relay.syncViewers(childIds())
   }
 
   function readCaptureSurface(stream: MediaStream | null) {
@@ -135,6 +178,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
   function releaseLocal() {
     captureGen += 1
     mesh.release()
+    relay.releaseLinks()
     localStream.value = null
     hasAudioTrack.value = false
     captureSurface.value = ''
@@ -181,12 +225,13 @@ export const useWebrtcStore = defineStore('webrtc', () => {
         role.value = 'idle'
       }
       if (role.value === 'publishing' && mesh.localStream) {
-        await mesh.syncViewers(room.viewers.map((item) => item.connId))
+        await mesh.syncViewers(childIds())
       }
       return
     }
 
     if (someoneElse) {
+      if (!room.audience) return
       if (role.value === 'publishing') {
         releaseLocal()
         ui.notify(shareEndText(room.shareEndedReason), 'warn')
@@ -197,6 +242,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
       const max = room.room?.maxViewers ?? 4
       if (claimBlocked && room.viewerCount < max) claimBlocked = false
       if (role.value !== 'viewing' && !claimBlocked) await beginViewing()
+      if (role.value === 'viewing') await syncRelay()
       return
     }
 
@@ -221,9 +267,9 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     const signal = asSignal(payload)
     if (!signal?.sdp || signal.sdp.type !== 'offer') return
     if (role.value === 'publishing') return
-    const publisher = room.share.publisherConnId
+    const parent = parentId()
     const from = signal.fromConnId
-    if (publisher && from && from !== publisher) return
+    if (parent && from && from !== parent) return
     if (role.value === 'viewing' && viewer.ready && from) {
       try {
         await viewer.acceptOffer(signal.sdp, from)
@@ -237,9 +283,10 @@ export const useWebrtcStore = defineStore('webrtc', () => {
 
   async function onAnswer(payload: unknown) {
     const signal = asSignal(payload)
-    if (!signal?.sdp || !signal.fromConnId || role.value !== 'publishing') return
+    if (!signal?.sdp || !signal.fromConnId) return
     try {
-      await mesh.acceptAnswer(signal.fromConnId, signal.sdp)
+      if (role.value === 'publishing') await mesh.acceptAnswer(signal.fromConnId, signal.sdp)
+      else if (role.value === 'viewing') await relay.acceptAnswer(signal.fromConnId, signal.sdp)
     } catch {
       ui.notify('某一路观众没有接上', 'warn')
     }
@@ -251,6 +298,8 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     try {
       if (role.value === 'publishing' && signal.fromConnId) {
         await mesh.acceptIce(signal.fromConnId, signal.candidate ?? null)
+      } else if (role.value === 'viewing' && signal.fromConnId && childIds().includes(signal.fromConnId)) {
+        await relay.acceptIce(signal.fromConnId, signal.candidate ?? null)
       } else if (role.value === 'viewing') {
         await viewer.acceptIce(signal.candidate ?? null)
       }
@@ -261,9 +310,10 @@ export const useWebrtcStore = defineStore('webrtc', () => {
 
   async function onRenegotiateAsk(payload: unknown) {
     const signal = asSignal(payload)
-    if (role.value !== 'publishing' || !signal?.fromConnId) return
+    if (!signal?.fromConnId) return
     try {
-      await mesh.renegotiate(signal.fromConnId)
+      if (role.value === 'publishing') await mesh.renegotiate(signal.fromConnId)
+      else if (role.value === 'viewing') await relay.renegotiate(signal.fromConnId)
     } catch {
       ui.notify('重新协商失败', 'error')
     }
@@ -385,7 +435,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     if (role.value === 'publishing') {
       mesh.closeAll()
       await ensureIce()
-      await mesh.syncViewers(room.viewers.map((item) => item.connId))
+      await mesh.syncViewers(childIds())
       ui.notify(ui.forceRelay ? '已改为强制走中继，正在重连观众' : '已改回自动连接，正在重连观众')
       return
     }
@@ -482,7 +532,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
       localStream.value = mesh.localStream
       captureSurface.value = readCaptureSurface(mesh.localStream)
       if (!hasAudio) ui.notify('这次分享没有音频，其他人只能看到画面', 'warn')
-      await mesh.syncViewers(room.viewers.map((item) => item.connId))
+      await mesh.syncViewers(childIds())
       refreshLink()
     } catch (error) {
       ui.notify(error instanceof Error ? error.message : '开始分享失败', 'error')

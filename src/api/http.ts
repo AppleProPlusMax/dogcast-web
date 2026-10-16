@@ -11,8 +11,13 @@ type RefreshHandler = () => Promise<string | null>
 type LostHandler = () => void
 
 let tokenGetter: TokenGetter | null = null
+let tokenOverride: TokenGetter | null = null
 let refreshHandler: RefreshHandler | null = null
 let lostHandler: LostHandler | null = null
+
+export function setTokenOverride(getter: TokenGetter | null) {
+  tokenOverride = getter
+}
 
 export function bindAuth(options: {
   getToken: TokenGetter
@@ -34,7 +39,7 @@ async function request<T>(path: string, init: ApiInit, allowRefresh: boolean): P
   headers.set('Accept', 'application/json')
 
   if (init.auth !== false) {
-    const token = tokenGetter?.()
+    const token = (tokenOverride ?? tokenGetter)?.()
     if (token) headers.set('Authorization', `Bearer ${token}`)
   }
 

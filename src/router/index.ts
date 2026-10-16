@@ -4,6 +4,7 @@ import LoginView from '@/views/LoginView.vue'
 import RegisterView from '@/views/RegisterView.vue'
 import RoomView from '@/views/RoomView.vue'
 import SettingsView from '@/views/SettingsView.vue'
+import WatchView from '@/views/WatchView.vue'
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -12,6 +13,7 @@ export const router = createRouter({
     { path: '/login', component: LoginView, meta: { public: true } },
     { path: '/register', component: RegisterView, meta: { public: true } },
     { path: '/room', component: RoomView },
+    { path: '/watch/:code', component: WatchView, meta: { public: true, guest: true } },
     { path: '/settings', component: SettingsView },
   ],
 })
@@ -37,6 +39,6 @@ router.beforeEach(async (to) => {
   if (!to.meta.public && auth.status !== 'authenticated') {
     return { path: '/login', query: to.fullPath === '/' ? {} : { redirect: to.fullPath } }
   }
-  if (to.meta.public && auth.status === 'authenticated') return { path: '/room' }
+  if (to.meta.public && auth.status === 'authenticated' && !to.meta.guest) return { path: '/room' }
   return true
 })

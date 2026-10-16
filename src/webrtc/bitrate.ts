@@ -8,13 +8,21 @@ export function perViewerBitrateKbps(totalKbps: number, viewerCount: number) {
   return Math.min(PER_VIEWER_MAX_KBPS, Math.max(PER_VIEWER_MIN_KBPS, share))
 }
 
-function scaleDownTo1080p(width: number, height: number) {
-  const factor = Math.min(width / 1920, height / 1080)
+function scaleDown(width: number, height: number, targetWidth: number, targetHeight: number) {
+  const factor = Math.min(width / targetWidth, height / targetHeight)
   return Math.max(factor, 1)
 }
 
-export async function setVideoMaxBitrate(pc: RTCPeerConnection, kbps: number) {
-  const maxBitrate = Math.round(kbps * 1000)
+export interface VideoEncodeProfile {
+  width: number
+  height: number
+  fps: number
+  bitrateKbps: number
+  degradation: 'maintain-resolution' | 'balanced' | 'maintain-framerate'
+}
+
+export async function setVideoMaxBitrate(pc: RTCPeerConnection, profile: VideoEncodeProfile) {
+  const maxBitrate = Math.round(profile.bitrateKbps * 1000)
   await Promise.all(
     pc.getSenders().map(async (sender) => {
       if (sender.track?.kind !== 'video') return
@@ -25,9 +33,14 @@ export async function setVideoMaxBitrate(pc: RTCPeerConnection, kbps: number) {
       const settings = sender.track.getSettings()
       encoding.maxBitrate = maxBitrate
       encoding.minBitrate = Math.min(MIN_BITRATE_BPS, maxBitrate)
-      encoding.maxFramerate = 60
-      encoding.scaleResolutionDownBy = scaleDownTo1080p(settings.width ?? 1920, settings.height ?? 1080)
-      params.degradationPreference = 'balanced'
+      encoding.maxFramerate = profile.fps
+      encoding.scaleResolutionDownBy = scaleDown(
+        settings.width ?? profile.width,
+        settings.height ?? profile.height,
+        profile.width,
+        profile.height,
+      )
+      params.degradationPreference = profile.degradation
       try {
         await sender.setParameters(params)
       } catch {

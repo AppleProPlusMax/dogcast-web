@@ -1,6 +1,6 @@
 import type { SignalPayload } from '@/types/protocol'
-import { captureDisplay } from '@/webrtc/constraints'
-import { serializeCandidate, setVideoMaxBitrate } from '@/webrtc/bitrate'
+import { captureDisplay, type CaptureProfile } from '@/webrtc/constraints'
+import { serializeCandidate, setVideoMaxBitrate, type VideoEncodeProfile } from '@/webrtc/bitrate'
 
 type OutboundType = 'signal.offer' | 'signal.ice-candidate'
 
@@ -9,7 +9,8 @@ export interface MeshOptions {
   selfConnId: () => string
   iceServers: () => RTCIceServer[]
   forceRelay: () => boolean
-  maxBitrateKbps: (viewerCount: number) => number
+  captureProfile: () => CaptureProfile
+  videoProfile: () => VideoEncodeProfile
   send: (type: OutboundType, payload: SignalPayload) => void
   onChange: () => void
 }
@@ -49,9 +50,19 @@ export class PublisherMesh {
   }
 
   async capture(onEnded: () => void) {
-    const stream = await captureDisplay()
+    const stream = await captureDisplay(this.opts.captureProfile())
     this.adopt(stream, onEnded)
     return this.hasAudio
+  }
+
+  useForward(stream: MediaStream) {
+    this.ignoreEnded = true
+    this.localStream = stream
+  }
+
+  releaseLinks() {
+    this.closeAll()
+    this.localStream = null
   }
 
   stopCapture() {
@@ -82,7 +93,7 @@ export class PublisherMesh {
     slot.remoteReady = true
     const queued = slot.pending.splice(0)
     for (const candidate of queued) await slot.pc.addIceCandidate(candidate)
-    await setVideoMaxBitrate(slot.pc, this.linkBitrateKbps())
+    await setVideoMaxBitrate(slot.pc, this.opts.videoProfile())
   }
 
   async acceptIce(fromConnId: string, candidate: RTCIceCandidateInit | null) {
@@ -103,7 +114,7 @@ export class PublisherMesh {
       if (!slot) continue
       const offer = await slot.pc.createOffer()
       await slot.pc.setLocalDescription(offer)
-      await setVideoMaxBitrate(slot.pc, this.linkBitrateKbps())
+      await setVideoMaxBitrate(slot.pc, this.opts.videoProfile())
       this.opts.send('signal.offer', {
         roomId: this.opts.roomId(),
         toConnId: id,
@@ -115,12 +126,12 @@ export class PublisherMesh {
 
   async applyBitrate() {
     await Promise.all(
-      [...this.slots.values()].map((slot) => setVideoMaxBitrate(slot.pc, this.linkBitrateKbps())),
+      [...this.slots.values()].map((slot) => setVideoMaxBitrate(slot.pc, this.opts.videoProfile())),
     )
   }
 
   async replaceSource(onEnded: () => void) {
-    const next = await captureDisplay()
+    const next = await captureDisplay(this.opts.captureProfile())
     const previous = this.localStream
     const hadAudio = this.hasAudio
     this.adopt(next, onEnded)
@@ -154,10 +165,6 @@ export class PublisherMesh {
     else await this.applyBitrate()
     this.opts.onChange()
     return this.hasAudio
-  }
-
-  private linkBitrateKbps() {
-    return this.opts.maxBitrateKbps(Math.max(1, this.slots.size))
   }
 
   private adopt(stream: MediaStream, onEnded: () => void) {
@@ -203,7 +210,7 @@ export class PublisherMesh {
       }
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
-      await setVideoMaxBitrate(pc, this.linkBitrateKbps())
+      await setVideoMaxBitrate(pc, this.opts.videoProfile())
       this.opts.send('signal.offer', {
         roomId: this.opts.roomId(),
         toConnId: viewerConnId,
@@ -239,7 +246,7 @@ export class PublisherMesh {
     const bump = () => {
       this.opts.onChange()
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        void setVideoMaxBitrate(pc, this.linkBitrateKbps())
+        void setVideoMaxBitrate(pc, this.opts.videoProfile())
       }
     }
     pc.onconnectionstatechange = bump

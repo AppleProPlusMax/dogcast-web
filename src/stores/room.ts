@@ -33,6 +33,7 @@ export const useRoomStore = defineStore('room', () => {
   const error = ref('')
   const shareEndedReason = ref<string | null>(null)
   const stateVersion = ref(0)
+  const audience = ref(false)
   let bound = false
 
   function touch() {
@@ -80,7 +81,14 @@ export const useRoomStore = defineStore('room', () => {
     }
   }
 
+  let guestToken: string | null = null
+
   async function onAuthError() {
+    if (guestToken) {
+      signaling.stop()
+      error.value = '观看链接失效了'
+      return
+    }
     const auth = useAuthStore()
     const token = await auth.refresh()
     if (!token) {
@@ -177,6 +185,8 @@ export const useRoomStore = defineStore('room', () => {
   }
 
   async function joinDefault() {
+    audience.value = false
+    guestToken = null
     error.value = ''
     try {
       if (!room.value) await loadRoomMeta()
@@ -197,6 +207,8 @@ export const useRoomStore = defineStore('room', () => {
   }
 
   function leave() {
+    guestToken = null
+    audience.value = false
     try {
       signaling.send('room.leave', {})
     } catch {
@@ -212,6 +224,15 @@ export const useRoomStore = defineStore('room', () => {
     shareEndedReason.value = null
   }
 
+  async function joinGuest(token: string) {
+    leave()
+    guestToken = token
+    audience.value = true
+    error.value = ''
+    bind()
+    signaling.start(() => guestToken)
+  }
+
   return {
     room,
     membership,
@@ -225,7 +246,9 @@ export const useRoomStore = defineStore('room', () => {
     error,
     shareEndedReason,
     stateVersion,
+    audience,
     joinDefault,
+    joinGuest,
     leave,
     bind,
   }

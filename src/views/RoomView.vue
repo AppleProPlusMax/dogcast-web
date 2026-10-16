@@ -7,6 +7,8 @@ import MemberList from '@/components/MemberList.vue'
 import ShareControls from '@/components/ShareControls.vue'
 import VideoStage from '@/components/VideoStage.vue'
 import { signalingState } from '@/api/ws'
+import { api } from '@/api/http'
+import { ApiError } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useRoomStore } from '@/stores/room'
 import { useUiStore } from '@/stores/ui'
@@ -92,6 +94,28 @@ function confirmHint(dontShowAgain: boolean) {
   void rtc.startPublish()
 }
 
+const watchLink = ref('')
+const copyingLink = ref(false)
+
+async function copyWatchLink() {
+  if (copyingLink.value) return
+  copyingLink.value = true
+  try {
+    const data = await api<{ code: string }>('/api/watch-links', {
+      method: 'POST',
+      body: JSON.stringify({ expiresInHours: 6 }),
+    })
+    const url = `${location.origin}/watch/${data.code}`
+    watchLink.value = url
+    await navigator.clipboard.writeText(url)
+    ui.notify('观看链接已复制，6 小时内有效')
+  } catch (error) {
+    ui.notify(error instanceof ApiError ? error.message : '没能生成观看链接', 'error')
+  } finally {
+    copyingLink.value = false
+  }
+}
+
 async function logout() {
   if (signingOut.value) return
   signingOut.value = true
@@ -161,7 +185,7 @@ async function logout() {
           <button v-if="room.error" class="btn" type="button" @click="room.joinDefault()">重试</button>
           <p v-else-if="!room.joined">正在连接房间…</p>
           <p v-else-if="rtc.role === 'viewing'">正在等待画面…</p>
-          <p v-else>等一个人把屏幕共享出来。</p>
+          <p v-else>把观看链接发给朋友。这一页只负责分享。</p>
         </div>
       </section>
 
@@ -202,15 +226,10 @@ async function logout() {
         {{ shareBlock }}
         <a :href="localhostUrl">打开 localhost</a>
       </p>
-      <button
-        v-if="someoneElse && rtc.role !== 'viewing' && !showPlayer"
-        class="btn"
-        type="button"
-        :disabled="rtc.busy"
-        @click="rtc.watchShare()"
-      >
-        观看
+      <button class="btn" type="button" :disabled="copyingLink" @click="copyWatchLink">
+        {{ copyingLink ? '正在生成链接…' : '复制观看链接' }}
       </button>
+      <p v-if="watchLink" class="hint">{{ watchLink }}</p>
       <label v-if="!showPlayer" class="volume" :class="{ off: rtc.role !== 'viewing' }">
         <input v-model="ui.remoteMuted" type="checkbox" :disabled="rtc.role !== 'viewing'" />
         <span>{{ ui.remoteMuted ? '已静音' : '声音' }}</span>

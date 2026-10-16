@@ -18,58 +18,59 @@ async function tryApply(video: MediaStreamTrack, constraints: MediaTrackConstrai
   }
 }
 
-async function raiseCaptureQuality(stream: MediaStream) {
+async function applyProfile(stream: MediaStream, profile: CaptureProfile) {
   const video = stream.getVideoTracks()[0]
   if (!video) return
-
-  const strictFps: MediaTrackConstraints = { frameRate: { min: 45, ideal: 60, max: 60 } }
-  const looseFps: MediaTrackConstraints = { frameRate: { ideal: 60, max: 60 } }
-  let fps: MediaTrackConstraints = {}
-  if (await tryApply(video, strictFps)) fps = strictFps
-  else if (await tryApply(video, looseFps)) fps = looseFps
-
-  const strictSize: MediaTrackConstraints = {
-    width: { min: 1920, ideal: 1920 },
-    height: { min: 1080, ideal: 1080 },
-  }
-  const looseSize: MediaTrackConstraints = {
-    width: { ideal: 1920 },
-    height: { ideal: 1080 },
-  }
-  if (!(await tryApply(video, { ...fps, ...strictSize }))) {
-    await tryApply(video, { ...fps, ...looseSize })
-  }
+  video.contentHint = profile.degradation === 'maintain-framerate' ? 'motion' : 'detail'
+  await tryApply(video, {
+    width: { ideal: profile.width, max: profile.width },
+    height: { ideal: profile.height, max: profile.height },
+    frameRate: { ideal: profile.fps, max: profile.fps },
+  })
 }
 
-async function captureOnce(audio: boolean) {
+async function captureOnce(audio: boolean, profile: CaptureProfile) {
   const stream = await navigator.mediaDevices.getDisplayMedia({
     video: true,
     audio,
   })
-  await raiseCaptureQuality(stream)
+  await applyProfile(stream, profile)
   return stream
 }
 
-export async function captureDisplay(): Promise<MediaStream> {
+export interface CaptureProfile {
+  width: number
+  height: number
+  fps: number
+  degradation: 'maintain-resolution' | 'balanced' | 'maintain-framerate'
+  systemAudio: boolean
+  microphone: boolean
+}
+
+export async function captureDisplay(profile: CaptureProfile): Promise<MediaStream> {
   const blocked = captureBlockReason()
   if (blocked) throw new Error(blocked)
 
-  // 弹窗里不带分辨率和帧率，避免勾选系统音频时 Chrome 整次失败。
-  // 拿到画面后再分别提高帧率和分辨率，一项失败不会把另一项一起丢掉。
-  try {
-    return await captureOnce(true)
-  } catch (error) {
-    if (isUserCancel(error)) throw error
-    if (!isAudioSourceFailure(error)) {
-      throw error instanceof Error ? error : new Error('无法捕获屏幕')
+  let stream: MediaStream
+  if (!profile.systemAudio) {
+    stream = await captureOnce(false, profile)
+  } else {
+    try {
+      stream = await captureOnce(true, profile)
+    } catch (error) {
+      if (isUserCancel(error)) throw error
+      if (!isAudioSourceFailure(error)) throw error instanceof Error ? error : new Error('无法捕获屏幕')
+      stream = await captureOnce(false, profile)
     }
   }
 
-  // 系统音频打不开时，再要一次只有画面的分享，不取消整次分享。
-  try {
-    return await captureOnce(false)
-  } catch (error) {
-    if (isUserCancel(error)) throw error
-    throw error instanceof Error ? error : new Error('无法捕获屏幕')
+  if (profile.microphone) {
+    try {
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      for (const track of mic.getAudioTracks()) stream.addTrack(track)
+    } catch (error) {
+      if (isUserCancel(error)) throw error
+    }
   }
+  return stream
 }

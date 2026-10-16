@@ -47,8 +47,8 @@ export function shareDenyText(reason: string | null | undefined) {
       return '已经有人在分享'
     case 'NOT_IN_ROOM':
       return '还没有进入房间'
-    case 'ALREADY_PUBLISHER':
-      return '你已经在分享'
+    case 'GUEST':
+      return '观看链接不能发起分享'
     default:
       return '现在不能开始分享'
   }

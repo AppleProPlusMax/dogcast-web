@@ -78,6 +78,7 @@ export interface MemberOnline {
 export interface ViewerRef {
   userId: string
   connId: string
+  parentConnId?: string | null
 }
 
 export interface ShareState {

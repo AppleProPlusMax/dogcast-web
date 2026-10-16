@@ -41,6 +41,14 @@ const volumePercent = computed({
     ui.remoteVolume = value / 100
   },
 })
+const qualityMbps = computed({
+  get: () => Math.round(ui.qualityBitrateKbps / 1000),
+  set: (value: number) => {
+    if (!Number.isFinite(value)) return
+    ui.markQualityCustom()
+    ui.qualityBitrateKbps = Math.min(20, Math.max(1, Math.round(value))) * 1000
+  },
+})
 const customMbps = computed({
   get: () => Math.round(ui.uploadBudgetKbps / 1000),
   set: (value: number) => {
@@ -184,6 +192,46 @@ async function logout() {
       <section class="panel">
         <p class="eyebrow">观看与分享</p>
         <h2>偏好</h2>
+        <div v-if="!phone" class="upload-block">
+          <div class="upload-head">
+            <span>画质</span>
+            <small>分享端只上传这一路。第二个人起，由已经连上的观众转发。</small>
+          </div>
+          <div class="preset-row">
+            <button
+              v-for="preset in (['720p30', '1080p30', '1080p60'] as const)"
+              :key="preset"
+              class="btn"
+              :class="{ primary: ui.qualityPreset === preset }"
+              type="button"
+              @click="ui.applyQualityPreset(preset)"
+            >
+              {{ preset }}
+            </button>
+          </div>
+          <div class="quality-grid">
+            <label>宽<input v-model.number="ui.qualityWidth" type="number" min="640" max="3840" step="2" @input="ui.markQualityCustom" /></label>
+            <label>高<input v-model.number="ui.qualityHeight" type="number" min="360" max="2160" step="2" @input="ui.markQualityCustom" /></label>
+            <label>帧<input v-model.number="ui.qualityFps" type="number" min="15" max="60" step="1" @input="ui.markQualityCustom" /></label>
+            <label>码率<input v-model.number="qualityMbps" type="number" min="1" max="20" step="1" /></label>
+          </div>
+          <label class="upload-custom">
+            <span>卡的时候</span>
+            <select v-model="ui.qualityDegradation" @change="ui.markQualityCustom">
+              <option value="maintain-resolution">保清晰</option>
+              <option value="balanced">均衡</option>
+              <option value="maintain-framerate">保帧数</option>
+            </select>
+          </label>
+          <label class="check">
+            <input v-model="ui.systemAudio" type="checkbox" />
+            <span>系统声音</span>
+          </label>
+          <label class="check">
+            <input v-model="ui.microphone" type="checkbox" />
+            <span>麦克风，和系统声音分开</span>
+          </label>
+        </div>
         <div v-if="!phone" class="upload-block">
           <div class="upload-head">
             <span>上传预算</span>
