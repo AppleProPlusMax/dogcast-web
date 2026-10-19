@@ -41,14 +41,6 @@ const volumePercent = computed({
     ui.remoteVolume = value / 100
   },
 })
-const qualityMbps = computed({
-  get: () => Math.round(ui.qualityBitrateKbps / 1000),
-  set: (value: number) => {
-    if (!Number.isFinite(value)) return
-    ui.markQualityCustom()
-    ui.qualityBitrateKbps = Math.min(20, Math.max(1, Math.round(value))) * 1000
-  },
-})
 const customMbps = computed({
   get: () => Math.round(ui.uploadBudgetKbps / 1000),
   set: (value: number) => {
@@ -208,12 +200,6 @@ async function logout() {
             >
               {{ preset }}
             </button>
-          </div>
-          <div class="quality-grid">
-            <label>宽<input v-model.number="ui.qualityWidth" type="number" min="640" max="3840" step="2" @input="ui.markQualityCustom" /></label>
-            <label>高<input v-model.number="ui.qualityHeight" type="number" min="360" max="2160" step="2" @input="ui.markQualityCustom" /></label>
-            <label>帧<input v-model.number="ui.qualityFps" type="number" min="15" max="60" step="1" @input="ui.markQualityCustom" /></label>
-            <label>码率<input v-model.number="qualityMbps" type="number" min="1" max="20" step="1" /></label>
           </div>
           <label class="upload-custom">
             <span>卡的时候</span>

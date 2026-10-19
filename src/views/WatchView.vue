@@ -38,7 +38,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="room">
+  <div class="room watch">
     <header class="topbar">
       <RouterLink class="brand" to="/">
         <BrandMark />
@@ -48,11 +48,12 @@ onBeforeUnmount(() => {
         <strong>{{ room.room?.name ?? '观看' }}</strong>
       </div>
     </header>
-    <div class="room-body">
+    <main class="room-main">
       <section class="stage as-player">
         <p v-if="error" class="banner warn">{{ error }}</p>
+        <div v-else class="screen-fit">
+          <div class="screen">
         <VideoStage
-          v-else
           player
           :stream="rtc.remoteStream"
           :muted="ui.remoteMuted"
@@ -65,7 +66,9 @@ onBeforeUnmount(() => {
           @update:volume="ui.remoteVolume = $event"
           @watch="rtc.watchShare()"
         />
+          </div>
+        </div>
       </section>
-    </div>
+    </main>
   </div>
 </template>

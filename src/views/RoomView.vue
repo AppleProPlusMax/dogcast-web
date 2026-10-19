@@ -134,23 +134,15 @@ async function logout() {
         <BrandMark />
         <span>Dogcast</span>
       </RouterLink>
-      <div class="top-meta">
-        <strong>{{ room.room?.name ?? '房间' }}</strong>
-        <span class="status-dot" :data-state="signalingState">{{ linkText }}</span>
-      </div>
       <nav class="top-actions">
+        <span class="status-dot" :data-state="signalingState">{{ linkText }}</span>
         <RouterLink to="/settings">设置</RouterLink>
         <button class="text-btn" type="button" :disabled="signingOut" @click="logout">退出</button>
       </nav>
     </header>
 
-    <div class="room-body">
+    <main class="room-main">
       <section class="stage" :class="{ 'as-player': showPlayer }">
-        <div v-if="!showPlayer" class="stage-copy">
-          <p class="eyebrow">{{ room.viewerCount }}/{{ room.room?.maxViewers ?? 4 }} 人在看</p>
-          <h1>{{ stageTitle }}</h1>
-          <p>{{ stageNote }}</p>
-        </div>
         <p v-if="!capability.secure" class="banner warn">当前页面不是安全上下文，浏览器不会允许分享屏幕。</p>
         <p v-else-if="showNoAudio && !showPlayer" class="banner warn">
           当前分享没有音频。可以停止后重试，并在浏览器窗口里勾选分享音频。
@@ -158,6 +150,8 @@ async function logout() {
         <p v-if="rtc.captureSurface === 'window' || rtc.captureSurface === 'browser'" class="banner warn">
           当前分享的是窗口。Windows 上这样采集经常是黑屏，手机也会一起黑。请停止后改选「整个屏幕」。
         </p>
+        <div class="screen-fit">
+          <div class="screen">
         <VideoStage
           v-if="showPlayer"
           ref="stage"
@@ -181,71 +175,79 @@ async function logout() {
           :volume="ui.remoteVolume"
         />
         <div v-else class="stage-empty">
-          <p v-if="room.error">{{ room.error }}</p>
-          <button v-if="room.error" class="btn" type="button" @click="room.joinDefault()">重试</button>
-          <p v-else-if="!room.joined">正在连接房间…</p>
-          <p v-else-if="rtc.role === 'viewing'">正在等待画面…</p>
-          <p v-else>把观看链接发给朋友。这一页只负责分享。</p>
+          <template v-if="room.error">
+            <p>{{ room.error }}</p>
+            <button class="btn" type="button" @click="room.joinDefault()">重试</button>
+          </template>
+          <template v-else>
+            <p class="welcome"><span class="spark">✦</span>{{ room.joined ? stageNote : '正在连接房间…' }}</p>
+            <div v-if="room.joined" class="entry-actions">
+              <button v-if="!phone" class="entry-action primary" type="button" :disabled="!canStart" @click="requestShare">
+                <i aria-hidden="true">
+                  <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <rect x="5" y="7" width="22" height="14" rx="2" />
+                    <path d="M12 25h8M16 21v4" stroke-linecap="round" />
+                  </svg>
+                </i>
+                {{ rtc.busy ? '连接中' : '开始分享' }}
+              </button>
+              <button class="entry-action" type="button" :disabled="copyingLink" @click="copyWatchLink">
+                <i aria-hidden="true">
+                  <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+                    <path d="M13 19l6-6" />
+                    <path d="M14 11h-1a5 5 0 0 0 0 10h1M18 21h1a5 5 0 0 0 0-10h-1" />
+                  </svg>
+                </i>
+                {{ copyingLink ? '生成中' : '观看链接' }}
+              </button>
+            </div>
+          </template>
+        </div>
+          </div>
         </div>
       </section>
 
-      <aside class="sidebar">
-        <div class="side-block">
-          <div class="side-head">
-            <h2>在线</h2>
-            <span>{{ room.membersOnline.length }}</span>
-          </div>
-          <MemberList
-            :members="room.membersOnline"
-            :self-conn-id="room.connId"
-            :publisher-conn-id="room.share.publisherConnId"
-            :viewer-conn-ids="viewerConnIds"
-          />
-        </div>
-        <div class="side-block quiet">
-          <h2>这台浏览器</h2>
-          <p>{{ capability.summary }}</p>
-          <p>{{ capability.audioAdvice }}</p>
-        </div>
-      </aside>
-    </div>
-
-    <footer class="dock">
-      <ShareControls
-        :sharing="rtc.role === 'publishing'"
-        :busy="rtc.busy"
-        :can-start="canStart"
-        :can-kick="canKick"
-        :can-share="!phone"
-        @start="requestShare"
-        @stop="rtc.stopPublish()"
-        @kick="rtc.kickShare()"
-        @switch-source="rtc.switchSource()"
-      />
-      <p v-if="shareBlock && !phone" class="hint">
-        {{ shareBlock }}
-        <a :href="localhostUrl">打开 localhost</a>
-      </p>
-      <button class="btn" type="button" :disabled="copyingLink" @click="copyWatchLink">
-        {{ copyingLink ? '正在生成链接…' : '复制观看链接' }}
-      </button>
-      <p v-if="watchLink" class="hint">{{ watchLink }}</p>
-      <label v-if="!showPlayer" class="volume" :class="{ off: rtc.role !== 'viewing' }">
-        <input v-model="ui.remoteMuted" type="checkbox" :disabled="rtc.role !== 'viewing'" />
-        <span>{{ ui.remoteMuted ? '已静音' : '声音' }}</span>
-        <input
-          v-model.number="volumePercent"
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          :disabled="rtc.role !== 'viewing'"
+      <footer class="dock">
+        <ShareControls
+          v-if="rtc.role === 'publishing' || canKick"
+          :sharing="rtc.role === 'publishing'"
+          :busy="rtc.busy"
+          :can-start="canStart"
+          :can-kick="canKick"
+          :can-share="!phone"
+          @start="requestShare"
+          @stop="rtc.stopPublish()"
+          @kick="rtc.kickShare()"
+          @switch-source="rtc.switchSource()"
         />
-      </label>
-      <button v-if="!showPlayer" class="btn ghost" type="button" :disabled="!activeStream" @click="stage?.toggleFullscreen()">全屏</button>
-      <button v-if="rtc.iceFailed" class="btn ghost" type="button" @click="rtc.askRenegotiate()">重新连接</button>
-      <span v-if="!showPlayer" class="meter">{{ rtc.bitrateLabel }}</span>
-    </footer>
+        <p v-if="shareBlock && !phone" class="hint">
+          {{ shareBlock }}
+          <a :href="localhostUrl">打开 localhost</a>
+        </p>
+        <button v-if="activeStream || watchLink" class="btn" type="button" :disabled="copyingLink" @click="copyWatchLink">
+          {{ copyingLink ? '正在生成链接…' : '复制观看链接' }}
+        </button>
+        <p v-if="watchLink" class="hint">{{ watchLink }}</p>
+        <label v-if="!showPlayer && rtc.role === 'viewing'" class="volume">
+          <input v-model="ui.remoteMuted" type="checkbox" />
+          <span>{{ ui.remoteMuted ? '已静音' : '声音' }}</span>
+          <input v-model.number="volumePercent" type="range" min="0" max="100" step="1" />
+        </label>
+        <button v-if="!showPlayer && activeStream" class="btn ghost" type="button" @click="stage?.toggleFullscreen()">全屏</button>
+        <button v-if="rtc.iceFailed" class="btn ghost" type="button" @click="rtc.askRenegotiate()">重新连接</button>
+        <span v-if="activeStream" class="meter">{{ rtc.bitrateLabel }}</span>
+      </footer>
+
+      <aside class="people">
+        <MemberList
+          :members="room.membersOnline"
+          :self-conn-id="room.connId"
+          :publisher-conn-id="room.share.publisherConnId"
+          :viewer-conn-ids="viewerConnIds"
+        />
+        <p class="quiet">{{ room.room?.name ?? '房间' }} · {{ room.viewerCount }}/{{ room.room?.maxViewers ?? 4 }} 人在看</p>
+      </aside>
+    </main>
 
     <AudioShareHint :open="hintOpen" @confirm="confirmHint" @cancel="hintOpen = false" />
   </div>
