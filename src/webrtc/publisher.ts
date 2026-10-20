@@ -86,14 +86,20 @@ export class PublisherMesh {
     return this.syncing
   }
 
-  async acceptAnswer(fromConnId: string, sdp: RTCSessionDescriptionInit) {
+  async acceptAnswer(fromConnId: string, description: RTCSessionDescriptionInit) {
     const slot = this.slots.get(fromConnId)
     if (!slot) return
-    await slot.pc.setRemoteDescription(sdp)
+    // Chrome 用远端 answer 里的 b=AS / x-google-*-bitrate 决定发送起点。
+    // 只改本地 offer 时，这些参数不会留在协商结果里，屏幕分享会从约 30 kbps 起爬。
+    const plan = this.bitratePlan()
+    const sdp = description.sdp
+      ? withVideoBitrate(description.sdp, plan.ceilingKbps, plan.targetKbps)
+      : description.sdp
+    await slot.pc.setRemoteDescription({ type: description.type, sdp })
     slot.remoteReady = true
     const queued = slot.pending.splice(0)
     for (const candidate of queued) await slot.pc.addIceCandidate(candidate)
-    await setVideoMaxBitrate(slot.pc, this.bitratePlan().profile)
+    await setVideoMaxBitrate(slot.pc, plan.profile)
   }
 
   async acceptIce(fromConnId: string, candidate: RTCIceCandidateInit | null) {
