@@ -23,7 +23,7 @@ export function planVideoBitrate(requested: VideoEncodeProfile, viewerCount: num
   }
 }
 
-// Chrome 对屏幕分享默认从大约 0.3 Mbps 起步，不写进 SDP 时经常停在这个起点。
+// 屏幕分享不写码率时，Chrome 会从大约 30 kbps 起步，并长期报 bandwidth 受限。
 export function withVideoBitrate(sdp: string, ceilingKbps: number, targetKbps: number) {
   const max = Math.max(300, Math.round(ceilingKbps))
   const start = Math.max(300, Math.min(max, Math.round(targetKbps)))
@@ -40,7 +40,10 @@ export function withVideoBitrate(sdp: string, ceilingKbps: number, targetKbps: n
 
   for (const line of lines) {
     if (line.startsWith('m=')) {
-      if (video) appendMissingFmtp(out, payloads, fmtpPayloads, hint)
+      if (video) {
+        if (!addedBandwidth) out.push(`b=AS:${max}`)
+        appendMissingFmtp(out, payloads, fmtpPayloads, hint)
+      }
       video = line.startsWith('m=video')
       addedBandwidth = false
       payloads.length = 0
@@ -53,6 +56,11 @@ export function withVideoBitrate(sdp: string, ceilingKbps: number, targetKbps: n
       continue
     }
     if (line.startsWith('b=AS:') || line.startsWith('b=TIAS:')) continue
+    // b= 必须出现在第一条 a= 之前。观看端的 answer 经常只有会话级 c=，不能等媒体级 c=。
+    if (line.startsWith('a=') && !addedBandwidth) {
+      out.push(`b=AS:${max}`)
+      addedBandwidth = true
+    }
     const payload = line.match(/^a=rtpmap:(\d+)\s/)
     if (payload?.[1]) payloads.push(payload[1])
     if (line.startsWith('a=fmtp:')) {
@@ -62,12 +70,11 @@ export function withVideoBitrate(sdp: string, ceilingKbps: number, targetKbps: n
       continue
     }
     out.push(line)
-    if (line.startsWith('c=') && !addedBandwidth) {
-      out.push(`b=AS:${max}`)
-      addedBandwidth = true
-    }
   }
-  if (video) appendMissingFmtp(out, payloads, fmtpPayloads, hint)
+  if (video) {
+    if (!addedBandwidth) out.push(`b=AS:${max}`)
+    appendMissingFmtp(out, payloads, fmtpPayloads, hint)
+  }
   return out.join(eol) + (trailing ? eol : '')
 }
 
@@ -110,6 +117,8 @@ function appendMissingFmtp(out: string[], payloads: string[], seen: Set<string>,
 
 export async function setVideoMaxBitrate(pc: RTCPeerConnection, profile: VideoEncodeProfile) {
   const maxBitrate = Math.round(profile.bitrateKbps * 1000)
+  // 屏幕分享的编码器默认下限约 30 kbps。只抬 max 时，带宽估计仍会从这里慢慢爬。
+  const minBitrate = Math.min(maxBitrate, Math.max(300_000, Math.round(maxBitrate * 0.25)))
   await Promise.all(
     pc.getSenders().map(async (sender) => {
       if (sender.track?.kind !== 'video') return
@@ -122,12 +131,15 @@ export async function setVideoMaxBitrate(pc: RTCPeerConnection, profile: VideoEn
       )
       const applied = await writeEncoding(sender, profile, {
         maxBitrate,
+        minBitrate,
         maxFramerate: profile.fps,
         scaleResolutionDownBy: scale,
         priority: 'high',
         networkPriority: 'high',
       })
-      if (!applied) await writeEncoding(sender, null, { maxBitrate })
+      if (applied) return
+      const withFloor = await writeEncoding(sender, null, { maxBitrate, minBitrate })
+      if (!withFloor) await writeEncoding(sender, null, { maxBitrate })
     }),
   )
 }
@@ -135,7 +147,7 @@ export async function setVideoMaxBitrate(pc: RTCPeerConnection, profile: VideoEn
 async function writeEncoding(
   sender: RTCRtpSender,
   profile: VideoEncodeProfile | null,
-  patch: RTCRtpEncodingParameters,
+  patch: RTCRtpEncodingParameters & { minBitrate?: number },
 ) {
   try {
     const params = sender.getParameters()
