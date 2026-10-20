@@ -1,6 +1,6 @@
 import type { SignalPayload } from '@/types/protocol'
 import { captureDisplay, type CaptureProfile } from '@/webrtc/constraints'
-import { serializeCandidate, setVideoMaxBitrate, type VideoEncodeProfile } from '@/webrtc/bitrate'
+import { planVideoBitrate, serializeCandidate, setVideoMaxBitrate, withVideoBitrate, type VideoEncodeProfile } from '@/webrtc/bitrate'
 
 type OutboundType = 'signal.offer' | 'signal.ice-candidate'
 
@@ -93,7 +93,7 @@ export class PublisherMesh {
     slot.remoteReady = true
     const queued = slot.pending.splice(0)
     for (const candidate of queued) await slot.pc.addIceCandidate(candidate)
-    await setVideoMaxBitrate(slot.pc, this.opts.videoProfile())
+    await setVideoMaxBitrate(slot.pc, this.bitratePlan().profile)
   }
 
   async acceptIce(fromConnId: string, candidate: RTCIceCandidateInit | null) {
@@ -112,22 +112,13 @@ export class PublisherMesh {
     for (const id of targets) {
       const slot = this.slots.get(id)
       if (!slot) continue
-      const offer = await slot.pc.createOffer()
-      await slot.pc.setLocalDescription(offer)
-      await setVideoMaxBitrate(slot.pc, this.opts.videoProfile())
-      this.opts.send('signal.offer', {
-        roomId: this.opts.roomId(),
-        toConnId: id,
-        fromConnId: this.opts.selfConnId(),
-        sdp: { type: 'offer', sdp: slot.pc.localDescription?.sdp ?? offer.sdp ?? '' },
-      })
+      await this.sendOffer(slot.pc, id)
     }
   }
 
   async applyBitrate() {
-    await Promise.all(
-      [...this.slots.values()].map((slot) => setVideoMaxBitrate(slot.pc, this.opts.videoProfile())),
-    )
+    const profile = this.bitratePlan().profile
+    await Promise.all([...this.slots.values()].map((slot) => setVideoMaxBitrate(slot.pc, profile)))
   }
 
   async replaceSource(onEnded: () => void) {
@@ -208,15 +199,7 @@ export class PublisherMesh {
           candidate: event.candidate ? serializeCandidate(event.candidate) : null,
         })
       }
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      await setVideoMaxBitrate(pc, this.opts.videoProfile())
-      this.opts.send('signal.offer', {
-        roomId: this.opts.roomId(),
-        toConnId: viewerConnId,
-        fromConnId: this.opts.selfConnId(),
-        sdp: { type: 'offer', sdp: pc.localDescription?.sdp ?? offer.sdp ?? '' },
-      })
+      await this.sendOffer(pc, viewerConnId)
       this.opts.onChange()
     } catch (error) {
       this.closeOne(viewerConnId)
@@ -235,6 +218,24 @@ export class PublisherMesh {
     this.opts.onChange()
   }
 
+  private bitratePlan() {
+    return planVideoBitrate(this.opts.videoProfile(), this.slots.size)
+  }
+
+  private async sendOffer(pc: RTCPeerConnection, viewerConnId: string) {
+    const offer = await pc.createOffer()
+    const plan = this.bitratePlan()
+    const sdp = withVideoBitrate(offer.sdp ?? '', plan.ceilingKbps, plan.targetKbps)
+    await pc.setLocalDescription({ type: 'offer', sdp })
+    await setVideoMaxBitrate(pc, plan.profile)
+    this.opts.send('signal.offer', {
+      roomId: this.opts.roomId(),
+      toConnId: viewerConnId,
+      fromConnId: this.opts.selfConnId(),
+      sdp: { type: 'offer', sdp: pc.localDescription?.sdp ?? sdp },
+    })
+  }
+
   private makePc() {
     return new RTCPeerConnection({
       iceServers: this.opts.iceServers(),
@@ -246,7 +247,7 @@ export class PublisherMesh {
     const bump = () => {
       this.opts.onChange()
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        void setVideoMaxBitrate(pc, this.opts.videoProfile())
+        void setVideoMaxBitrate(pc, this.bitratePlan().profile)
       }
     }
     pc.onconnectionstatechange = bump

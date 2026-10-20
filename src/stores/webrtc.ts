@@ -37,6 +37,7 @@ function videoProfile(ui: ReturnType<typeof useUiStore>): VideoEncodeProfile {
     height: ui.qualityHeight,
     fps: ui.qualityFps,
     bitrateKbps: ui.qualityBitrateKbps,
+    uploadBudgetKbps: ui.uploadBudgetKbps,
     degradation: ui.qualityDegradation,
   }
 }
@@ -418,9 +419,13 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     watch(() => room.stateVersion, () => {
       void reconcile()
     })
-    watch(() => ui.uploadBudgetKbps, () => {
-      if (role.value === 'publishing') void mesh.applyBitrate()
-    })
+    watch(
+      () => [ui.uploadBudgetKbps, ui.qualityBitrateKbps, ui.qualityFps, ui.qualityWidth, ui.qualityHeight, ui.qualityDegradation],
+      () => {
+        if (role.value === 'publishing') void mesh.applyBitrate()
+        else if (role.value === 'viewing') void relay.applyBitrate()
+      },
+    )
     watch(() => ui.forceRelay, () => {
       void onRelayChange()
     })

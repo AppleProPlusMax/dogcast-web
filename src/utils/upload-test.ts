@@ -4,7 +4,8 @@ import { ApiError, toApiError } from '@/api/errors'
 const WARMUP_BYTES = 256 * 1024
 const MEASURE_MS = 5_000
 const MIN_CHUNK = 256 * 1024
-const MAX_CHUNK = 8 * 1024 * 1024
+// 线上 Nginx 默认只收约 1MB。再大就会返回 HTML，测速被当成无法识别的内容。
+const MAX_CHUNK = 768 * 1024
 const TARGET_CHUNK_MS = 700
 
 export interface UploadSample {
@@ -74,8 +75,14 @@ async function sendChunk(bytes: number, token: string | null) {
     try {
       data = JSON.parse(text) as unknown
     } catch {
+      if (response.status === 413) {
+        throw new ApiError('VALIDATION_ERROR', '上传被网站网关拒绝了，单次体积太大', response.status)
+      }
       throw new ApiError('INTERNAL', '服务器返回了无法识别的内容', response.status)
     }
+  }
+  if (response.status === 413) {
+    throw new ApiError('VALIDATION_ERROR', '上传被网站网关拒绝了，单次体积太大', response.status)
   }
   if (!response.ok) throw toApiError(data, response.status)
   return { elapsedMs }

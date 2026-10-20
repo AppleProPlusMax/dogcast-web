@@ -21,7 +21,7 @@ async function tryApply(video: MediaStreamTrack, constraints: MediaTrackConstrai
 async function applyProfile(stream: MediaStream, profile: CaptureProfile) {
   const video = stream.getVideoTracks()[0]
   if (!video) return
-  video.contentHint = profile.degradation === 'maintain-framerate' ? 'motion' : 'detail'
+  video.contentHint = profile.degradation === 'maintain-resolution' ? 'detail' : 'motion'
   await tryApply(video, {
     width: { ideal: profile.width, max: profile.width },
     height: { ideal: profile.height, max: profile.height },
