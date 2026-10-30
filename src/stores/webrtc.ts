@@ -594,11 +594,11 @@ export const useWebrtcStore = defineStore('webrtc', () => {
   }
 
   function askRenegotiate() {
-    const publisher = room.share.publisherConnId
-    if (role.value !== 'viewing' || !publisher || !room.connId || !room.room) return
+    const parent = parentId()
+    if (role.value !== 'viewing' || !parent || !room.connId || !room.room) return
     signaling.send('signal.renegotiate-ask', {
       roomId: room.room.id,
-      toConnId: publisher,
+      toConnId: parent,
       fromConnId: room.connId,
     })
     ui.notify('已请求重新连接')
