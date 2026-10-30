@@ -2,38 +2,20 @@
 import { computed, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import BrandMark from '@/components/BrandMark.vue'
-import { api } from '@/api/http'
 import { ApiError } from '@/api/errors'
-import { useAuthStore } from '@/stores/auth'
+import { readLobby } from '@/lobby'
 import { UPLOAD_BUDGET_MAX_KBPS, UPLOAD_BUDGET_MIN_KBPS, UPLOAD_PRESETS, useUiStore } from '@/stores/ui'
-import { signOut } from '@/session'
 import { detectCapability, isPhone } from '@/utils/browser-capability'
 import { formatMbps, measureSustainedUpload } from '@/utils/upload-test'
 
-const INVITE_MAX_USES = 100
-const INVITE_HOURS = 1
-
-const auth = useAuthStore()
 const ui = useUiStore()
 const capability = detectCapability()
 const phone = isPhone()
-const signingOut = ref(false)
-const creatingInvite = ref(false)
-const inviteError = ref('')
-const copied = ref(false)
-const invite = ref<{ code: string; expiresAt: string | null } | null>(null)
 const testingUpload = ref(false)
 const uploadElapsedMs = ref(0)
 const uploadLiveMbps = ref(0)
 const uploadResult = ref<{ measured: string; suggested: number; seconds: string; local: boolean } | null>(null)
 const uploadTestError = ref('')
-
-const isAdmin = computed(() => auth.user?.role === 'admin')
-const inviteExpiryText = computed(() => {
-  const expiresAt = invite.value?.expiresAt
-  if (!expiresAt) return ''
-  return new Date(expiresAt).toLocaleString('zh-CN', { hour12: false })
-})
 
 const volumePercent = computed({
   get: () => Math.round(ui.remoteVolume * 100),
@@ -68,16 +50,14 @@ async function measureUpload() {
     uploadElapsedMs.value = sample.elapsedMs
     uploadLiveMbps.value = sample.mbps
   }
+  const token = readLobby()?.accessToken ?? null
+  if (!token) {
+    uploadTestError.value = '先开始一次分享，再测上行'
+    testingUpload.value = false
+    return
+  }
   try {
-    let token = auth.accessToken
-    let result
-    try {
-      result = await measureSustainedUpload({ token, onSample })
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 401) throw error
-      token = await auth.refresh()
-      result = await measureSustainedUpload({ token, onSample })
-    }
+    const result = await measureSustainedUpload({ token, onSample })
     const local = isLocalServer()
     const suggested = Math.min(80, Math.max(12, Math.round(result.mbps * 0.7)))
     if (!local) ui.uploadBudgetKbps = suggested * 1000
@@ -96,91 +76,19 @@ async function measureUpload() {
   }
 }
 
-async function createInvite() {
-  if (!isAdmin.value || creatingInvite.value) return
-  creatingInvite.value = true
-  inviteError.value = ''
-  copied.value = false
-  try {
-    invite.value = await api<{ code: string; id: string; expiresAt: string | null }>('/api/admin/invites', {
-      method: 'POST',
-      body: JSON.stringify({ maxUses: INVITE_MAX_USES, expiresInHours: INVITE_HOURS }),
-    })
-  } catch (error) {
-    invite.value = null
-    inviteError.value = error instanceof ApiError ? error.message : '邀请码生成失败'
-  } finally {
-    creatingInvite.value = false
-  }
-}
-
-async function copyInvite() {
-  const code = invite.value?.code
-  if (!code) return
-  try {
-    await navigator.clipboard.writeText(code)
-    copied.value = true
-  } catch {
-    copied.value = false
-    inviteError.value = '复制失败，请手动选择邀请码'
-  }
-}
-
-async function logout() {
-  if (signingOut.value) return
-  signingOut.value = true
-  try {
-    await signOut()
-  } finally {
-    signingOut.value = false
-  }
-}
 </script>
 
 <template>
   <main class="settings">
     <header class="topbar">
-      <RouterLink class="brand" to="/room">
+      <RouterLink class="brand" to="/">
         <BrandMark />
         <span>Dogcast</span>
       </RouterLink>
-      <RouterLink to="/room">返回房间</RouterLink>
+      <RouterLink to="/">返回首页</RouterLink>
     </header>
 
     <div class="settings-grid">
-      <section class="panel">
-        <p class="eyebrow">账号</p>
-        <h1>{{ auth.user?.displayName }}</h1>
-        <dl>
-          <div>
-            <dt>用户名</dt>
-            <dd>{{ auth.user?.username }}</dd>
-          </div>
-          <div>
-            <dt>显示名</dt>
-            <dd>{{ auth.user?.displayName }}</dd>
-          </div>
-          <div>
-            <dt>身份</dt>
-            <dd>{{ auth.user?.role === 'admin' ? '管理员' : '成员' }}</dd>
-          </div>
-        </dl>
-        <p class="hint">显示名在注册时确定。这一版没有修改资料的接口。</p>
-        <template v-if="isAdmin">
-          <button class="btn" type="button" :disabled="creatingInvite" @click="createInvite">
-            {{ creatingInvite ? '正在生成…' : '生成邀请码' }}
-          </button>
-          <p class="hint">生成后 1 小时内最多可使用 100 次。明文只在这里显示一次。</p>
-          <p v-if="inviteError" class="form-error">{{ inviteError }}</p>
-          <div v-if="invite" class="invite-result">
-            <p class="invite-code">{{ invite.code }}</p>
-            <p class="hint">有效期至 {{ inviteExpiryText }}</p>
-            <button class="btn ghost" type="button" @click="copyInvite">{{ copied ? '已复制' : '复制邀请码' }}</button>
-          </div>
-        </template>
-        <button class="btn danger" type="button" :disabled="signingOut" @click="logout">退出登录</button>
-      </section>
-
       <section class="panel">
         <p class="eyebrow">观看与分享</p>
         <h2>偏好</h2>
@@ -267,10 +175,6 @@ async function logout() {
         <label class="check">
           <input v-model="ui.remoteMuted" type="checkbox" />
           <span>静音远程声音</span>
-        </label>
-        <label class="check">
-          <input v-model="ui.forceRelay" type="checkbox" />
-          <span>强制走 TURN 中继（只在排障时打开）</span>
         </label>
         <label v-if="!phone" class="check">
           <input v-model="ui.showAudioShareHint" type="checkbox" />

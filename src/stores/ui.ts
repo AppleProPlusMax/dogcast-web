@@ -85,7 +85,6 @@ export const useUiStore = defineStore('ui', () => {
       } else if (typeof data.preferredMaxBitrateKbps === 'number') {
         uploadBudgetKbps.value = nearestUploadBudget(data.preferredMaxBitrateKbps)
       }
-      if (typeof data.forceRelay === 'boolean') forceRelay.value = data.forceRelay
       if (typeof data.remoteMuted === 'boolean') remoteMuted.value = data.remoteMuted
       if (typeof data.remoteVolume === 'number') remoteVolume.value = clamp(data.remoteVolume, 0, 1)
       if (typeof data.showAudioShareHint === 'boolean') showAudioShareHint.value = data.showAudioShareHint

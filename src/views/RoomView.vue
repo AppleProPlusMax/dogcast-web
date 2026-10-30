@@ -1,22 +1,21 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { RouterLink, useRouter } from 'vue-router'
 import AudioShareHint from '@/components/AudioShareHint.vue'
 import BrandMark from '@/components/BrandMark.vue'
 import MemberList from '@/components/MemberList.vue'
 import ShareControls from '@/components/ShareControls.vue'
 import VideoStage from '@/components/VideoStage.vue'
 import { signalingState } from '@/api/ws'
-import { api } from '@/api/http'
 import { ApiError } from '@/api/errors'
-import { useAuthStore } from '@/stores/auth'
+import { readLobby, watchUrl } from '@/lobby'
+import { setTokenOverride } from '@/api/http'
 import { useRoomStore } from '@/stores/room'
 import { useUiStore } from '@/stores/ui'
 import { useWebrtcStore } from '@/stores/webrtc'
-import { signOut } from '@/session'
 import { captureBlockReason, detectCapability, isPhone, localhostShareUrl } from '@/utils/browser-capability'
 
-const auth = useAuthStore()
+const router = useRouter()
 const room = useRoomStore()
 const rtc = useWebrtcStore()
 const ui = useUiStore()
@@ -26,7 +25,7 @@ const shareBlock = captureBlockReason()
 const localhostUrl = localhostShareUrl()
 const hintOpen = ref(false)
 const stage = ref<{ toggleFullscreen: () => void } | null>(null)
-const signingOut = ref(false)
+const lobby = readLobby()
 
 const viewerConnIds = computed(() => room.viewers.map((item) => item.connId))
 const someoneElse = computed(
@@ -69,9 +68,7 @@ const linkText = computed(() => {
 const canStart = computed(
   () => room.joined && signalingState.value === 'open' && !someoneElse.value && !rtc.busy,
 )
-const canKick = computed(
-  () => auth.user?.role === 'admin' && someoneElse.value && signalingState.value === 'open',
-)
+const canKick = computed(() => false)
 const showPlayer = computed(() => rtc.role === 'viewing' || (someoneElse.value && rtc.role !== 'publishing'))
 const playerDetail = computed(() => {
   const audio = rtc.remoteStream ? (rtc.remoteHasAudio ? '有声音' : '没有声音') : '等待画面'
@@ -98,46 +95,41 @@ const watchLink = ref('')
 const copyingLink = ref(false)
 
 async function copyWatchLink() {
-  if (copyingLink.value) return
+  if (copyingLink.value || !lobby) return
   copyingLink.value = true
   try {
-    const data = await api<{ code: string }>('/api/watch-links', {
-      method: 'POST',
-      body: JSON.stringify({ expiresInHours: 6 }),
-    })
-    const url = `${location.origin}/watch/${data.code}`
+    const url = watchUrl(lobby.code)
     watchLink.value = url
     await navigator.clipboard.writeText(url)
-    ui.notify('观看链接已复制，6 小时内有效')
+    ui.notify('观看链接已复制，12 小时内有效')
   } catch (error) {
-    ui.notify(error instanceof ApiError ? error.message : '没能生成观看链接', 'error')
+    ui.notify(error instanceof ApiError ? error.message : '没能复制观看链接', 'error')
   } finally {
     copyingLink.value = false
   }
 }
 
-async function logout() {
-  if (signingOut.value) return
-  signingOut.value = true
-  try {
-    await signOut()
-  } finally {
-    signingOut.value = false
+onMounted(() => {
+  if (!lobby) {
+    void router.replace('/')
+    return
   }
-}
+  setTokenOverride(() => readLobby()?.accessToken ?? null)
+  void room.joinHost(lobby.accessToken)
+  rtc.attach()
+})
 </script>
 
 <template>
   <div class="room">
     <header class="topbar">
-      <RouterLink class="brand" to="/room">
+      <RouterLink class="brand" to="/">
         <BrandMark />
         <span>Dogcast</span>
       </RouterLink>
       <nav class="top-actions">
         <span class="status-dot" :data-state="signalingState">{{ linkText }}</span>
         <RouterLink to="/settings">设置</RouterLink>
-        <button class="text-btn" type="button" :disabled="signingOut" @click="logout">退出</button>
       </nav>
     </header>
 
@@ -177,7 +169,7 @@ async function logout() {
         <div v-else class="stage-empty">
           <template v-if="room.error">
             <p>{{ room.error }}</p>
-            <button class="btn" type="button" @click="room.joinDefault()">重试</button>
+            <button v-if="lobby" class="btn" type="button" @click="room.joinHost(lobby.accessToken)">重试</button>
           </template>
           <template v-else>
             <p class="welcome"><span class="spark">✦</span>{{ room.joined ? stageNote : '正在连接房间…' }}</p>
@@ -245,7 +237,7 @@ async function logout() {
           :publisher-conn-id="room.share.publisherConnId"
           :viewer-conn-ids="viewerConnIds"
         />
-        <p class="quiet">{{ room.room?.name ?? '房间' }} · {{ room.viewerCount }}/{{ room.room?.maxViewers ?? 4 }} 人在看</p>
+        <p class="quiet">房间号 {{ lobby?.code ?? room.room?.name ?? '—' }} · {{ room.viewerCount }}/{{ room.room?.maxViewers ?? 4 }} 人在看</p>
       </aside>
     </main>
 

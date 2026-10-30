@@ -1,12 +1,9 @@
 import { ref } from 'vue'
 import { defineStore } from 'pinia'
-import { api } from '@/api/http'
-import { ApiError, errorText } from '@/api/errors'
+import { errorText } from '@/api/errors'
 import { signaling } from '@/api/ws'
-import { useAuthStore, markReplacedElsewhere } from '@/stores/auth'
 import { useUiStore } from '@/stores/ui'
 import type {
-  DefaultRoomResponse,
   Envelope,
   MemberOnline,
   Membership,
@@ -56,12 +53,6 @@ export const useRoomStore = defineStore('room', () => {
     touch()
   }
 
-  async function loadRoomMeta() {
-    const data = await api<DefaultRoomResponse>('/api/rooms/default')
-    room.value = data.room
-    membership.value = data.membership
-  }
-
   async function onAuthed(envelope: Envelope) {
     const payload = readRecord(envelope.payload)
     if (typeof payload.connId === 'string') connId.value = payload.connId
@@ -82,25 +73,19 @@ export const useRoomStore = defineStore('room', () => {
   }
 
   let guestToken: string | null = null
+  let hostToken: string | null = null
 
   async function onAuthError() {
-    if (guestToken) {
+    if (guestToken || hostToken) {
       signaling.stop()
-      error.value = '观看链接失效了'
+      error.value = guestToken ? '观看链接失效了' : '这次分享已经失效，请回到首页重新开始'
       return
     }
-    const auth = useAuthStore()
-    const token = await auth.refresh()
-    if (!token) {
-      signaling.stop()
-      auth.failSession()
-      return
-    }
-    signaling.start(() => auth.accessToken)
+    signaling.stop()
+    error.value = '连接已失效，请回到首页重新开始'
   }
 
   function onSignedInElsewhere() {
-    markReplacedElsewhere()
     signaling.stop()
     joined.value = false
     connId.value = null
@@ -108,8 +93,7 @@ export const useRoomStore = defineStore('room', () => {
     share.value = { status: 'idle' }
     viewers.value = []
     viewerCount.value = 0
-    useAuthStore().failSession()
-    useUiStore().notify('这个账号已在另一处登录', 'warn')
+    useUiStore().notify('这个房间已在另一处打开', 'warn')
   }
 
   function onPresenceJoined(payload: unknown) {
@@ -184,30 +168,19 @@ export const useRoomStore = defineStore('room', () => {
     signaling.on('error', (envelope) => onError(envelope.payload))
   }
 
-  async function joinDefault() {
+  async function joinHost(token: string) {
+    if (hostToken === token && joined.value) return
+    leave()
+    hostToken = token
     audience.value = false
-    guestToken = null
     error.value = ''
-    try {
-      if (!room.value) await loadRoomMeta()
-    } catch (err) {
-      error.value = err instanceof ApiError ? err.message : '无法读取房间'
-      return
-    }
     bind()
-    const auth = useAuthStore()
-    signaling.start(() => auth.accessToken)
-    if (signaling.isReady() && !joined.value) {
-      await onAuthed({
-        v: 1,
-        type: 'auth.ok',
-        payload: { connId: connId.value, userId: selfUserId.value },
-      })
-    }
+    signaling.start(() => hostToken)
   }
 
   function leave() {
     guestToken = null
+    hostToken = null
     audience.value = false
     try {
       signaling.send('room.leave', {})
@@ -247,7 +220,7 @@ export const useRoomStore = defineStore('room', () => {
     shareEndedReason,
     stateVersion,
     audience,
-    joinDefault,
+    joinHost,
     joinGuest,
     leave,
     bind,

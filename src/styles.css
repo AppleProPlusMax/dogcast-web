@@ -385,6 +385,28 @@ media-play-button[slot="centered-chrome"] {
 .entry-action svg { width: 28px; height: 28px; }
 .entry-action.primary i { background: var(--accent); border-color: transparent; color: white; box-shadow: 0 10px 20px rgba(217, 119, 87, 0.35); }
 .entry-action:not(:disabled):hover i { transform: translateY(-3px); }
+.join-row {
+  display: flex;
+  gap: 8px;
+  width: min(360px, 100%);
+}
+.join-row input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(255, 250, 246, 0.35);
+  background: rgba(255, 250, 246, 0.08);
+  color: #fffaf6;
+  border-radius: 999px;
+  padding: 10px 14px;
+}
+.join-row input::placeholder { color: rgba(255, 250, 246, 0.55); }
+.join-row.on-page { margin-top: 4px; }
+.join-row.on-page input {
+  border-color: var(--line);
+  background: var(--bg-raised);
+  color: var(--text);
+}
+.join-row.on-page input::placeholder { color: var(--muted); }
 .banner {
   flex: none;
   width: min(720px, 100%);
