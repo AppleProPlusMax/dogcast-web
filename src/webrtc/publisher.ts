@@ -60,7 +60,17 @@ export class PublisherMesh {
     this.localStream = stream
   }
 
+  hasViewer(id: string) {
+    return this.slots.has(id)
+  }
+
+  refreshForward() {
+    this.syncing = this.syncing.then(() => this.syncForwardTracks()).catch(() => undefined)
+    return this.syncing
+  }
+
   releaseLinks() {
+    this.forwardDirty.clear()
     this.closeAll()
     this.localStream = null
   }
@@ -100,6 +110,7 @@ export class PublisherMesh {
     const queued = slot.pending.splice(0)
     for (const candidate of queued) await slot.pc.addIceCandidate(candidate)
     await setVideoMaxBitrate(slot.pc, plan.profile)
+    void this.refreshForward()
   }
 
   async acceptIce(fromConnId: string, candidate: RTCIceCandidateInit | null) {
@@ -181,10 +192,58 @@ export class PublisherMesh {
     for (const id of [...this.slots.keys()]) {
       if (!want.has(id)) this.closeOne(id)
     }
+    await this.syncForwardTracks()
     for (const id of want) {
       if (!this.slots.has(id)) await this.offerTo(id)
     }
     await this.applyBitrate()
+  }
+
+  private forwardDirty = new Set<string>()
+
+  private async syncForwardTracks() {
+    const stream = this.localStream
+    if (!stream || this.slots.size === 0) return
+    const pending = new Set(this.forwardDirty)
+    for (const [id, slot] of this.slots) {
+      const senders = [...slot.pc.getSenders()]
+      let slotChanged = false
+      for (const track of stream.getTracks()) {
+        const sender = senders.find((item) => item.track?.kind === track.kind)
+        if (sender) {
+          if (sender.track !== track) {
+            await sender.replaceTrack(track)
+            slotChanged = true
+          }
+        } else {
+          slot.pc.addTrack(track, stream)
+          slotChanged = true
+        }
+      }
+      for (const kind of ['audio', 'video'] as const) {
+        if (stream.getTracks().some((track) => track.kind === kind)) continue
+        for (const sender of [...slot.pc.getSenders()]) {
+          if (sender.track?.kind !== kind) continue
+          slot.pc.removeTrack(sender)
+          slotChanged = true
+        }
+      }
+      if (slotChanged) pending.add(id)
+    }
+    this.forwardDirty.clear()
+    for (const id of pending) {
+      const slot = this.slots.get(id)
+      if (!slot) continue
+      if (slot.pc.signalingState !== 'stable') {
+        this.forwardDirty.add(id)
+        continue
+      }
+      try {
+        await this.sendOffer(slot.pc, id)
+      } catch {
+        this.forwardDirty.add(id)
+      }
+    }
   }
 
   private async offerTo(viewerConnId: string) {
@@ -221,6 +280,7 @@ export class PublisherMesh {
     slot.pc.oniceconnectionstatechange = null
     slot.pc.close()
     this.slots.delete(id)
+    this.forwardDirty.delete(id)
     this.opts.onChange()
   }
 

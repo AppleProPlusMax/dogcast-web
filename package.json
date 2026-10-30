@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit -p tsconfig.app.json && vite build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
+    "typecheck": "vue-tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "node --experimental-strip-types --test src/webrtc/bitrate.test.ts src/webrtc/ice-route.test.ts src/api/auth-retry.test.ts"
   },
   "dependencies": {
     "media-chrome": "^4.19.3",

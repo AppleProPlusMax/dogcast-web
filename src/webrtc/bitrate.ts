@@ -1,10 +1,9 @@
-const PER_VIEWER_MIN_KBPS = 3_000
 const PER_VIEWER_MAX_KBPS = 20_000
 
 export function perViewerBitrateKbps(totalKbps: number, viewerCount: number) {
   const viewers = Math.max(1, viewerCount)
-  const share = Math.round(totalKbps / viewers)
-  return Math.min(PER_VIEWER_MAX_KBPS, Math.max(PER_VIEWER_MIN_KBPS, share))
+  const share = Math.max(1, Math.round(Math.max(0, totalKbps) / viewers))
+  return Math.min(PER_VIEWER_MAX_KBPS, share)
 }
 
 export interface BitratePlan {
@@ -27,7 +26,8 @@ export function planVideoBitrate(requested: VideoEncodeProfile, viewerCount: num
 export function withVideoBitrate(sdp: string, ceilingKbps: number, targetKbps: number) {
   const max = Math.max(300, Math.round(ceilingKbps))
   const start = Math.max(300, Math.min(max, Math.round(targetKbps)))
-  const min = Math.max(300, Math.min(start, Math.round(start * 0.25)))
+  // 起步用目标码率。下限只留 300 kbps，弱网时编码器还能再降，不会把上传预算撑破。
+  const min = Math.min(start, 300)
   const hint = `x-google-max-bitrate=${max};x-google-start-bitrate=${start};x-google-min-bitrate=${min}`
   const eol = sdp.includes('\r\n') ? '\r\n' : '\n'
   const trailing = /\r?\n$/.test(sdp)
@@ -117,8 +117,8 @@ function appendMissingFmtp(out: string[], payloads: string[], seen: Set<string>,
 
 export async function setVideoMaxBitrate(pc: RTCPeerConnection, profile: VideoEncodeProfile) {
   const maxBitrate = Math.round(profile.bitrateKbps * 1000)
-  // 屏幕分享的编码器默认下限约 30 kbps。只抬 max 时，带宽估计仍会从这里慢慢爬。
-  const minBitrate = Math.min(maxBitrate, Math.max(300_000, Math.round(maxBitrate * 0.25)))
+  // 起步码率写在 SDP 里。这里的下限只挡住 30 kbps 的爬升，不能高到无法再降。
+  const minBitrate = Math.min(maxBitrate, 300_000)
   await Promise.all(
     pc.getSenders().map(async (sender) => {
       if (sender.track?.kind !== 'video') return
@@ -129,17 +129,17 @@ export async function setVideoMaxBitrate(pc: RTCPeerConnection, profile: VideoEn
         profile.width,
         profile.height,
       )
-      const applied = await writeEncoding(sender, profile, {
+      const shape = {
         maxBitrate,
-        minBitrate,
         maxFramerate: profile.fps,
         scaleResolutionDownBy: scale,
-        priority: 'high',
-        networkPriority: 'high',
-      })
+        priority: 'high' as const,
+        networkPriority: 'high' as const,
+      }
+      const applied = await writeEncoding(sender, profile, { ...shape, minBitrate })
       if (applied) return
-      const withFloor = await writeEncoding(sender, null, { maxBitrate, minBitrate })
-      if (!withFloor) await writeEncoding(sender, null, { maxBitrate })
+      const withoutFloor = await writeEncoding(sender, profile, shape)
+      if (!withoutFloor) await writeEncoding(sender, profile, { maxBitrate })
     }),
   )
 }

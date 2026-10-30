@@ -1,3 +1,4 @@
+import { shouldRefreshOnUnauthorized } from '@/api/auth-retry'
 import { apiUrl } from '@/api/env'
 import { ApiError, toApiError } from '@/api/errors'
 
@@ -54,7 +55,11 @@ async function request<T>(path: string, init: ApiInit, allowRefresh: boolean): P
     throw new ApiError('NETWORK', '连不上服务器', 0)
   }
 
-  if (response.status === 401 && allowRefresh && init.auth !== false) {
+  if (response.status === 401 && init.auth !== false) {
+    const guest = tokenOverride !== null
+    if (!shouldRefreshOnUnauthorized({ allowRefresh, auth: true, guest })) {
+      throw new ApiError('UNAUTHORIZED', guest ? '观看链接失效了' : '登录已过期', 401)
+    }
     const token = await refreshHandler?.()
     if (token) return request<T>(path, init, false)
     lostHandler?.()

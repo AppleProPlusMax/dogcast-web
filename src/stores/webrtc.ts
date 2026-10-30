@@ -10,6 +10,7 @@ import { isUserCancel, type CaptureProfile } from '@/webrtc/constraints'
 import { captureBlockReason } from '@/utils/browser-capability'
 import { type VideoEncodeProfile } from '@/webrtc/bitrate'
 import { PublisherMesh } from '@/webrtc/publisher'
+import { routeSignalIce } from '@/webrtc/ice-route'
 import { ViewerSession } from '@/webrtc/viewer'
 
 function toIceServers(servers: IceServer[]): RTCIceServer[] {
@@ -76,6 +77,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
   let lastBytes = 0
   let lastTs = 0
   let suppressEndToast = false
+  const parkedIce = new Map<string, RTCIceCandidateInit[]>()
 
   function refreshLink() {
     linkVersion.value += 1
@@ -116,11 +118,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     forceRelay: () => ui.forceRelay,
     send,
     onStream: (stream) => {
-      remoteStream.value = stream
-      remoteHasAudio.value = stream.getAudioTracks().length > 0
-      stream.onaddtrack = () => {
-        remoteHasAudio.value = stream.getAudioTracks().length > 0
-      }
+      rememberRemote(stream)
     },
     onChange: refreshLink,
   })
@@ -156,19 +154,59 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     }
   }
 
+  function clearRelay() {
+    relay.releaseLinks()
+    parkedIce.clear()
+  }
+
+  function parkIce(id: string, candidate: RTCIceCandidateInit) {
+    const queued = parkedIce.get(id) ?? []
+    queued.push(candidate)
+    parkedIce.set(id, queued.slice(-30))
+  }
+
+  async function flushParked(ids: string[]) {
+    for (const id of ids) {
+      if (!relay.hasViewer(id)) continue
+      const queued = parkedIce.get(id)
+      if (!queued?.length) continue
+      parkedIce.delete(id)
+      for (const candidate of queued) {
+        try {
+          await relay.acceptIce(id, candidate)
+        } catch {
+          // 这条候选已经用不上了。
+        }
+      }
+    }
+  }
+
   function rememberRemote(stream: MediaStream | null) {
     remoteStream.value = stream
     remoteHasAudio.value = Boolean(stream && stream.getAudioTracks().length > 0)
-    if (role.value === 'viewing' && stream) void syncRelay()
+    if (!stream) {
+      clearRelay()
+      return
+    }
+    stream.onaddtrack = () => {
+      remoteHasAudio.value = stream.getAudioTracks().length > 0
+      if (role.value === 'viewing') void syncRelay()
+    }
+    if (role.value === 'viewing') void syncRelay()
   }
 
   async function syncRelay() {
-    if (role.value !== 'viewing' || !remoteStream.value) {
-      relay.releaseLinks()
+    if (role.value !== 'viewing') {
+      clearRelay()
       return
     }
-    relay.useForward(remoteStream.value)
-    await relay.syncViewers(childIds())
+    const stream = remoteStream.value
+    if (!stream) return
+    relay.useForward(stream)
+    await relay.refreshForward()
+    const ids = childIds()
+    await relay.syncViewers(ids)
+    await flushParked(ids)
   }
 
   function readCaptureSurface(stream: MediaStream | null) {
@@ -179,7 +217,7 @@ export const useWebrtcStore = defineStore('webrtc', () => {
   function releaseLocal() {
     captureGen += 1
     mesh.release()
-    relay.releaseLinks()
+    clearRelay()
     localStream.value = null
     hasAudioTrack.value = false
     captureSurface.value = ''
@@ -297,12 +335,22 @@ export const useWebrtcStore = defineStore('webrtc', () => {
     const signal = asSignal(payload)
     if (!signal) return
     try {
-      if (role.value === 'publishing' && signal.fromConnId) {
-        await mesh.acceptIce(signal.fromConnId, signal.candidate ?? null)
-      } else if (role.value === 'viewing' && signal.fromConnId && childIds().includes(signal.fromConnId)) {
-        await relay.acceptIce(signal.fromConnId, signal.candidate ?? null)
-      } else if (role.value === 'viewing') {
+      const from = signal.fromConnId
+      const route = routeSignalIce({
+        role: role.value,
+        fromConnId: from,
+        parentConnId: parentId(),
+        childConnIds: childIds(),
+      })
+      if (route === 'publish' && from) {
+        await mesh.acceptIce(from, signal.candidate ?? null)
+      } else if (route === 'relay' && from) {
+        if (signal.candidate && !relay.hasViewer(from)) parkIce(from, signal.candidate)
+        else await relay.acceptIce(from, signal.candidate ?? null)
+      } else if (route === 'viewer') {
         await viewer.acceptIce(signal.candidate ?? null)
+      } else if (role.value === 'viewing' && from && signal.candidate) {
+        parkIce(from, signal.candidate)
       }
     } catch {
       // 迟到的候选丢弃即可。
@@ -445,14 +493,17 @@ export const useWebrtcStore = defineStore('webrtc', () => {
       return
     }
     if (role.value === 'viewing') {
-      const publisher = room.share.publisherConnId
-      if (!publisher || !room.connId || !room.room) return
+      const parent = parentId()
+      if (!parent || !room.connId || !room.room) return
       viewer.close()
+      clearRelay()
+      remoteStream.value = null
+      remoteHasAudio.value = false
       await ensureIce()
       viewer.prepare()
       signaling.send('signal.renegotiate-ask', {
         roomId: room.room.id,
-        toConnId: publisher,
+        toConnId: parent,
         fromConnId: room.connId,
       })
       ui.notify('已请求按新的网络方式重连')
